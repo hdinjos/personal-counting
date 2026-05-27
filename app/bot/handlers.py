@@ -5,6 +5,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -12,9 +13,14 @@ from telegram.ext import ContextTypes
 from app.bot import messages
 from app.services.report_service import ReportService
 from app.services.transaction_service import TransactionService
-from app.utils.dates import month_from_date, today_local_date
+from app.utils.dates import month_from_date, parse_receipt_date, today_local_date
+from app.utils.money import normalize_amount
 
 logger = logging.getLogger(__name__)
+
+PENDING_TOTAL_KEY = "pending_total_confirmation"
+PENDING_TOTAL_TIMEOUT_SECONDS = 600
+CANCEL_KEYWORDS = {"batal", "/batal"}
 
 
 class BotHandlers:
@@ -123,6 +129,67 @@ class BotHandlers:
             logger.exception("Failed to generate PDF")
             await update.message.reply_text("Terjadi kesalahan saat membuat laporan PDF.")
 
+    async def batal_pending_total(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
+            return
+
+        pending = self._get_pending_confirmation(context)
+        if not pending:
+            await update.message.reply_text("Tidak ada transaksi yang menunggu konfirmasi total.")
+            return
+
+        self._clear_pending_confirmation(context)
+        await update.message.reply_text("Konfirmasi total dibatalkan. Transaksi tidak disimpan.")
+
+    async def handle_pending_total_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
+            return
+
+        pending = self._get_pending_confirmation(context)
+        if not pending:
+            return
+
+        raw_text = (update.message.text or "").strip()
+        lowered = raw_text.lower()
+        if lowered in CANCEL_KEYWORDS:
+            self._clear_pending_confirmation(context)
+            await update.message.reply_text("Konfirmasi total dibatalkan. Transaksi tidak disimpan.")
+            return
+
+        if self._is_pending_expired(pending):
+            self._clear_pending_confirmation(context)
+            await update.message.reply_text(
+                "Konfirmasi total sudah kedaluwarsa. Silakan kirim ulang struk atau voice note."
+            )
+            return
+
+        total = normalize_amount(raw_text)
+        if total is None or total <= 0:
+            await update.message.reply_text(
+                "Nominal tidak valid. Kirim angka total akhir transaksi, atau `batal` / `/batal` untuk membatalkan."
+            )
+            return
+
+        upload_date = parse_receipt_date(pending.get("upload_date"))
+
+        try:
+            result = await asyncio.to_thread(
+                self.transaction_service.store_confirmed_transaction,
+                update.effective_user.id,
+                update.effective_user.username,
+                pending["image_path"],
+                pending["normalized_payload"],
+                total,
+                upload_date,
+            )
+        except Exception:
+            logger.exception("Failed to confirm manual total")
+            await update.message.reply_text("Terjadi kesalahan saat menyimpan transaksi. Silakan coba lagi.")
+            return
+
+        self._clear_pending_confirmation(context)
+        await update.message.reply_text(messages.format_transaction_result(result))
+
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
             return
@@ -166,7 +233,7 @@ class BotHandlers:
                 str(destination),
                 extracted,
             )
-            await update.message.reply_text(messages.format_transaction_result(result))
+            await self._respond_transaction_result(update, context, result, str(destination))
         except Exception:
             logger.exception("Failed to process receipt photo")
             await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
@@ -213,7 +280,49 @@ class BotHandlers:
                 extracted,
             )
             await msg.delete()
-            await update.message.reply_text(messages.format_transaction_result(result))
+            await self._respond_transaction_result(update, context, result, str(destination))
         except Exception:
             logger.exception("Failed to process voice note")
             await update.message.reply_text("Maaf, terjadi kesalahan saat memproses pesan suara.")
+
+    async def _respond_transaction_result(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        result: dict[str, Any],
+        image_path: str,
+    ) -> None:
+        if result.get("status") == "needs_total_confirmation":
+            pending = {
+                "image_path": image_path,
+                "normalized_payload": result.get("pending_payload", {}),
+                "upload_date": result.get("date"),
+                "created_at_ts": datetime.now().timestamp(),
+            }
+            self._set_pending_confirmation(context, pending)
+            await update.message.reply_text(messages.format_total_confirmation_request(result))
+            return
+
+        await update.message.reply_text(messages.format_transaction_result(result))
+
+    @staticmethod
+    def _set_pending_confirmation(context: ContextTypes.DEFAULT_TYPE, pending: dict[str, Any]) -> None:
+        context.user_data[PENDING_TOTAL_KEY] = pending
+
+    @staticmethod
+    def _clear_pending_confirmation(context: ContextTypes.DEFAULT_TYPE) -> None:
+        context.user_data.pop(PENDING_TOTAL_KEY, None)
+
+    @staticmethod
+    def _get_pending_confirmation(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
+        pending = context.user_data.get(PENDING_TOTAL_KEY)
+        if isinstance(pending, dict):
+            return pending
+        return None
+
+    @staticmethod
+    def _is_pending_expired(pending: dict[str, Any]) -> bool:
+        created_at_ts = pending.get("created_at_ts")
+        if not isinstance(created_at_ts, (int, float)):
+            return True
+        return (datetime.now().timestamp() - float(created_at_ts)) > PENDING_TOTAL_TIMEOUT_SECONDS

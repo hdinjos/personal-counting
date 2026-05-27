@@ -23,6 +23,7 @@ BOT_COMMANDS = [
     BotCommand("laporan_bulan_ini", "Lihat laporan pengeluaran bulan ini"),
     BotCommand("transaksi_terakhir", "Lihat transaksi terbaru"),
     BotCommand("rekap", "Buat laporan harian (PDF)"),
+    BotCommand("batal", "Batalkan input total manual"),
 ]
 
 
@@ -85,8 +86,10 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("laporan_bulan_ini", handlers.laporan_bulan_ini))
     application.add_handler(CommandHandler("transaksi_terakhir", handlers.transaksi_terakhir))
     application.add_handler(CommandHandler("rekap", handlers.rekap_command))
+    application.add_handler(CommandHandler("batal", handlers.batal_pending_total))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handlers.handle_photo))
     application.add_handler(MessageHandler(filters.VOICE, handlers.handle_voice))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_pending_total_text))
     return application
 
 

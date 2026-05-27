@@ -4,7 +4,7 @@ from app.utils.money import format_rupiah
 
 START_MESSAGE = (
     "Halo, saya bot pencatat pengeluaran.\n"
-    "Kirim foto struk belanja, lalu saya bantu simpan transaksinya."
+    "Kirim foto struk atau voice note transaksi, lalu saya bantu simpan transaksinya."
 )
 
 HELP_MESSAGE = (
@@ -13,30 +13,50 @@ HELP_MESSAGE = (
     "/help\n"
     "/laporan_hari_ini\n"
     "/laporan_bulan_ini\n"
-    "/transaksi_terakhir\n\n"
-    "Kirim foto struk kapan saja untuk dicatat."
+    "/transaksi_terakhir\n"
+    "/rekap\n"
+    "/batal (batalkan input total manual)\n\n"
+    "Kirim foto struk atau voice note kapan saja untuk dicatat."
 )
 
-FAILED_RECEIPT_MESSAGE = (
-    "Maaf, struk belum bisa dibaca.\n"
-    "Silakan coba foto ulang dengan pencahayaan lebih jelas."
+FAILED_TRANSACTION_MESSAGE = (
+    "Maaf, transaksi belum bisa diproses.\n"
+    "Silakan upload ulang struk atau kirim voice note kembali."
 )
+
+# Backward compatible alias.
+FAILED_RECEIPT_MESSAGE = FAILED_TRANSACTION_MESSAGE
+
+
+def format_total_confirmation_request(result: dict) -> str:
+    return (
+        "Data transaksi terbaca, tetapi total belum konsisten.\n\n"
+        f"Toko: {result.get('store_name') or '-'}\n"
+        f"Tanggal: {result.get('date') or '-'}\n"
+        f"Total terdeteksi: {format_rupiah(result.get('total'))}\n"
+        f"Total hitung item: {format_rupiah(result.get('expected_total'))}\n\n"
+        "Balas dengan nominal total akhir (angka saja), atau kirim `batal` / `/batal` untuk membatalkan transaksi ini."
+    )
 
 
 def format_transaction_result(result: dict) -> str:
     status = result.get("status", "failed")
+
     if status == "success":
-        return (
-            "Struk berhasil disimpan.\n\n"
-            f"Toko: {result.get('store_name') or '-'}\n"
-            f"Tanggal: {result.get('date') or '-'}\n"
-            f"Total: {format_rupiah(result.get('total'))}\n"
-            "Status: success"
-        )
+        details = [
+            "Transaksi berhasil disimpan.\n",
+            f"Toko: {result.get('store_name') or '-'}",
+            f"Tanggal: {result.get('date') or '-'}",
+            f"Total: {format_rupiah(result.get('total'))}",
+            "Status: success",
+        ]
+        if result.get("manual_total_input"):
+            details.append("Keterangan: total transaksi diinput manual oleh user.")
+        return "\n".join(details)
 
     if status == "partial":
         return (
-            "Struk berhasil dibaca sebagian.\n\n"
+            "Transaksi berhasil dibaca sebagian.\n\n"
             f"Toko: {result.get('store_name') or '-'}\n"
             f"Tanggal: {result.get('date') or '-'}\n"
             f"Total: {format_rupiah(result.get('total'))}\n"
@@ -44,7 +64,14 @@ def format_transaction_result(result: dict) -> str:
             "Beberapa informasi mungkin tidak terbaca."
         )
 
-    return FAILED_RECEIPT_MESSAGE
+    if status == "needs_total_confirmation":
+        return format_total_confirmation_request(result)
+
+    message = result.get("message")
+    if message:
+        return f"Transaksi gagal diproses.\n{message}"
+
+    return FAILED_TRANSACTION_MESSAGE
 
 
 def format_daily_report(report: dict) -> str:
@@ -80,4 +107,3 @@ def format_last_transactions(report: dict) -> str:
             f"- {tx['date']} | {tx['store_name']} | {format_rupiah(tx['total'])} ({tx['status']})"
         )
     return "\n".join(lines)
-
