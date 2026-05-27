@@ -17,10 +17,11 @@ Expense Agent adalah Telegram Bot untuk mencatat pengeluaran pribadi dari foto s
 ### B) Voice Note
 1. User mengirim voice note ke bot Telegram.
 2. Bot menyimpan audio `.ogg` ke `uploads/`.
-3. Bot mentranskripsi audio ke teks dengan `openai-whisper`.
-4. Teks hasil transkripsi dikirim ke model AI lokal `llama.cpp` untuk diekstrak menjadi JSON transaksi.
-5. Data masuk pipeline validasi/normalisasi yang sama, lalu disimpan ke SQLite.
-6. Bot mengirim status proses transaksi ke user.
+3. Bot mengirim file audio ke endpoint lokal `whisper.cpp` `whisper-server`.
+4. `whisper-server` mengembalikan teks transkripsi.
+5. Teks hasil transkripsi dikirim ke model AI lokal `llama.cpp` untuk diekstrak menjadi JSON transaksi.
+6. Data masuk pipeline validasi/normalisasi yang sama, lalu disimpan ke SQLite.
+7. Bot mengirim status proses transaksi ke user.
 
 ### C) Laporan
 User bisa melihat:
@@ -32,26 +33,34 @@ User bisa melihat:
 ## 3) Cara Kerja Teknis (System Flow)
 - **Transport**: Telegram Bot API (`python-telegram-bot`)
 - **AI Extractor**: `LlamaCppReceiptExtractor`
-- **Voice Transcriber**: `VoiceTranscriber` (`openai-whisper`, default model `tiny`, language `id`)
+- **Voice Transcriber**: `VoiceTranscriber` (HTTP client ke `whisper-server`, language default `id`)
 - **Database**: SQLite via SQLAlchemy
 - **Parser**: `json_utils` untuk menghapus code fence dan ekstrak JSON dari output campuran
 - **PDF Report**: `report_service.generate_daily_pdf()` menggunakan `fpdf2`
 
 ### Integrasi AI Lokal
-- Base URL default: `http://localhost:8000/v1`
-- Endpoint: `POST /chat/completions`
-- Payload bisa dua mode:
+- Base URL extractor default: `http://localhost:8000/v1`
+- Endpoint extractor: `POST /chat/completions`
+- Base URL transcriber default: `http://127.0.0.1:8001`
+- Endpoint transcriber default: `POST /inference` (`multipart/form-data`)
+- Payload transkripsi mengirim field:
+  - `file` (audio)
+  - `language` (`id`)
+  - `response_format` (`json`)
+- Payload extractor bisa dua mode:
   - **Vision mode** (foto): text prompt + `image_url` data URL base64 (`data:image/jpeg;base64,...`)
   - **Text mode** (voice): text prompt + teks hasil transkripsi
-- Model field wajib dikirim dari `LLAMACPP_MODEL` (default `local-qwen3-vl`)
+- Model field extractor wajib dikirim dari `LLAMACPP_MODEL` (default `local-qwen3-vl`)
 
-### Referensi Model & Dokumentasi llama.cpp
-- Model Hugging Face: https://huggingface.co/unsloth/Qwen3-VL-2B-Instruct-GGUF
+### Referensi Model & Dokumentasi
+- Model Hugging Face (vision extractor): https://huggingface.co/unsloth/Qwen3-VL-2B-Instruct-GGUF
 - Repositori resmi llama.cpp: https://github.com/ggml-org/llama.cpp
 - Dokumentasi server llama.cpp (OpenAI-compatible API): https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+- Repositori resmi whisper.cpp: https://github.com/ggml-org/whisper.cpp
+- Dokumentasi whisper-server: https://github.com/ggml-org/whisper.cpp/tree/master/examples/server
 
 ### Sinkronisasi Nama Model (`model` field)
-- Di aplikasi, request selalu mengirim `model` dari env `LLAMACPP_MODEL`.
+- Di aplikasi, request extractor selalu mengirim `model` dari env `LLAMACPP_MODEL`.
 - Agar konsisten, jalankan `llama-server` dengan `--alias local-qwen3-vl` (sesuai default `.env.example`).
 - Jika Anda tidak memakai alias, ubah `LLAMACPP_MODEL` ke nama model yang benar-benar tersedia di endpoint `/v1/models`.
 
@@ -64,10 +73,12 @@ User bisa melihat:
 1. Python `3.11+`
 2. Sistem bisa menjalankan `llama-server` lokal
 3. Model multimodal `.gguf` + `mmproj` tersedia di lokal
-4. Telegram bot token aktif
-5. Port `llama-server` sesuai `LLAMACPP_BASE_URL` di `.env`
-6. Dependency tambahan untuk fitur baru:
-   - `openai-whisper>=20231117`
+4. Sistem bisa menjalankan `whisper-server` lokal
+5. Model whisper (`ggml-small.bin` atau varian lain) tersedia di lokal
+6. Telegram bot token aktif
+7. Port `llama-server` sesuai `LLAMACPP_BASE_URL` di `.env`
+8. Port/path `whisper-server` sesuai `WHISPER_SERVER_BASE_URL` + `WHISPER_SERVER_INFERENCE_PATH`
+9. Dependency tambahan untuk fitur baru:
    - `fpdf2>=2.8.0`
 
 ## 5) Cara Menjalankan
@@ -85,6 +96,9 @@ Isi minimal `.env`:
 - `TELEGRAM_BOT_TOKEN=...`
 - `LLAMACPP_BASE_URL=http://localhost:8000/v1`
 - `LLAMACPP_MODEL=local-qwen3-vl`
+- `WHISPER_SERVER_BASE_URL=http://127.0.0.1:8001`
+- `WHISPER_SERVER_INFERENCE_PATH=/inference`
+- `WHISPER_LANGUAGE=id`
 - `USE_DUMMY_EXTRACTOR=false`
 
 ### 5.2 Jalankan llama-server (model Unsloth)
@@ -125,13 +139,25 @@ Catatan: pada dokumentasi server `llama.cpp`, parameter `-hf/--hf-repo` otomatis
   --port 8000
 ```
 
-### 5.3 Jalankan Bot
+### 5.3 Jalankan whisper-server
+```bash
+/home/hdinjos/Dev/whisper.cpp/build/bin/whisper-server \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --language id \
+  --convert \
+  --model /home/hdinjos/Dev/models/audio/ggml-small.bin
+```
+
+Catatan: karena voice note Telegram berformat `.ogg`, opsi `--convert` membutuhkan `ffmpeg` terpasang di sistem.
+
+### 5.4 Jalankan Bot
 ```bash
 source .venv/bin/activate
 python run.py
 ```
 
-### 5.4 Jalankan Test
+### 5.5 Jalankan Test
 ```bash
 source .venv/bin/activate
 pytest -q
@@ -143,7 +169,10 @@ pytest -q
   - cek `LLAMACPP_BASE_URL` dan port
   - cek format output model (JSON valid atau tidak)
 - Voice note gagal diproses:
-  - cek dependency `openai-whisper` terpasang
+  - cek `whisper-server` hidup
+  - cek `WHISPER_SERVER_BASE_URL` + `WHISPER_SERVER_INFERENCE_PATH`
+  - karena input Telegram `.ogg`, pastikan `whisper-server` dijalankan dengan `--convert`
+  - pastikan `ffmpeg` tersedia di PATH
   - cek file audio berhasil terunduh ke `uploads/`
 - Menu command tidak muncul:
   - restart bot (karena command didaftarkan saat startup)

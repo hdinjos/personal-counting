@@ -55,7 +55,12 @@ def build_application() -> Application:
     repository = TransactionRepository()
     transaction_service = TransactionService(repository, settings.timezone)
     report_service = ReportService(repository)
-    voice_transcriber = VoiceTranscriber(model_name="tiny")
+    voice_transcriber = VoiceTranscriber(
+        base_url=settings.whisper_server_base_url,
+        inference_path=settings.whisper_server_inference_path,
+        timeout_seconds=settings.whisper_server_timeout_seconds,
+        language=settings.whisper_language,
+    )
 
     handlers = BotHandlers(
         transaction_service=transaction_service,

@@ -16,6 +16,10 @@ class Settings:
     telegram_bot_token: str
     llamacpp_base_url: str
     llamacpp_model: str
+    whisper_server_base_url: str
+    whisper_server_inference_path: str
+    whisper_server_timeout_seconds: int
+    whisper_language: str
     database_url: str
     upload_dir: Path
     use_dummy_extractor: bool
@@ -43,6 +47,10 @@ def get_settings() -> Settings:
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         llamacpp_base_url=os.getenv("LLAMACPP_BASE_URL", "http://localhost:8000/v1").rstrip("/"),
         llamacpp_model=os.getenv("LLAMACPP_MODEL", "local-qwen3-vl"),
+        whisper_server_base_url=os.getenv("WHISPER_SERVER_BASE_URL", "http://127.0.0.1:8080").rstrip("/"),
+        whisper_server_inference_path=os.getenv("WHISPER_SERVER_INFERENCE_PATH", "/inference"),
+        whisper_server_timeout_seconds=int(os.getenv("WHISPER_SERVER_TIMEOUT_SECONDS", "120")),
+        whisper_language=os.getenv("WHISPER_LANGUAGE", "id"),
         database_url=os.getenv("DATABASE_URL", "sqlite:///expense-agent.db"),
         upload_dir=upload_dir,
         use_dummy_extractor=_env_bool("USE_DUMMY_EXTRACTOR", False),
