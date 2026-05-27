@@ -1,15 +1,17 @@
 # Expense Agent (MVP)
 
-Telegram Bot untuk mencatat pengeluaran dari foto struk dengan extractor AI lokal `llama.cpp` (`llama-server` OpenAI-compatible).
+Telegram Bot untuk mencatat pengeluaran dari foto struk dan voice note dengan extractor AI lokal `llama.cpp` (`llama-server` OpenAI-compatible).
 
 ## Fitur MVP
-- Command bot: `/start`, `/help`, `/laporan_hari_ini`, `/laporan_bulan_ini`, `/transaksi_terakhir`
+- Command bot: `/start`, `/help`, `/laporan_hari_ini`, `/laporan_bulan_ini`, `/transaksi_terakhir`, `/rekap`
 - Upload foto struk ke Telegram
-- Simpan foto ke folder `uploads/`
-- Ekstraksi data struk via endpoint lokal `http://localhost:8000/v1/chat/completions`
+- Kirim voice note transaksi ke Telegram
+- Simpan file upload ke folder `uploads/`
+- Ekstraksi data transaksi via endpoint lokal `http://localhost:8000/v1/chat/completions`
 - Validasi + normalisasi JSON hasil ekstraksi
 - Simpan transaksi ke SQLite
 - Laporan pengeluaran harian dan bulanan
+- Export rekap harian ke PDF
 
 ## Dokumentasi
 - Panduan produk / operasional: [docs/PRODUCT_GUIDE.md](docs/PRODUCT_GUIDE.md)
@@ -69,4 +71,3 @@ pytest
 - Tidak menggunakan Ollama
 - Request AI diarahkan ke `LLAMACPP_BASE_URL`
 - Field `model` selalu dikirim menggunakan `LLAMACPP_MODEL` (default: `local-qwen3-vl`)
-

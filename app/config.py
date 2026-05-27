@@ -22,6 +22,7 @@ class Settings:
     extractor_backend: str
     request_timeout_seconds: int
     timezone: str
+    enable_user_whitelist: bool
     allowed_user_ids: list[int]
 
 
@@ -48,6 +49,6 @@ def get_settings() -> Settings:
         extractor_backend=os.getenv("EXTRACTOR_BACKEND", "llamacpp").lower(),
         request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "120")),
         timezone=os.getenv("TZ", "Asia/Jakarta"),
+        enable_user_whitelist=_env_bool("ENABLE_USER_WHITELIST", False),
         allowed_user_ids=[int(u.strip()) for u in os.getenv("ALLOWED_USER_IDS", "").split(",") if u.strip().isdigit()],
     )
-

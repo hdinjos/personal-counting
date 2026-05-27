@@ -1,9 +1,10 @@
 # Product Guide - Expense Agent MVP
 
 ## 1) Tujuan Produk
-Expense Agent adalah Telegram Bot untuk mencatat pengeluaran pribadi dari foto struk belanja, lalu menyajikannya sebagai laporan harian dan bulanan.
+Expense Agent adalah Telegram Bot untuk mencatat pengeluaran pribadi dari foto struk atau voice note transaksi, lalu menyajikannya sebagai laporan harian, bulanan, dan rekap PDF harian.
 
 ## 2) Flow Alur Produk (User Flow)
+### A) Foto Struk
 1. User mengirim foto struk ke bot Telegram.
 2. Bot menyimpan foto ke folder `uploads/` dengan nama unik: `user_id_timestamp.jpg`.
 3. Bot mengirim gambar ke model AI lokal `llama.cpp` (OpenAI-compatible API).
@@ -12,23 +13,36 @@ Expense Agent adalah Telegram Bot untuk mencatat pengeluaran pribadi dari foto s
 6. Data divalidasi dan dinormalisasi.
 7. Data transaksi disimpan ke SQLite.
 8. Bot membalas hasil proses (`success`, `partial`, atau `failed`).
-9. User bisa melihat:
-   - `/laporan_hari_ini`
-   - `/laporan_bulan_ini`
-   - `/transaksi_terakhir`
+
+### B) Voice Note
+1. User mengirim voice note ke bot Telegram.
+2. Bot menyimpan audio `.ogg` ke `uploads/`.
+3. Bot mentranskripsi audio ke teks dengan `openai-whisper`.
+4. Teks hasil transkripsi dikirim ke model AI lokal `llama.cpp` untuk diekstrak menjadi JSON transaksi.
+5. Data masuk pipeline validasi/normalisasi yang sama, lalu disimpan ke SQLite.
+6. Bot mengirim status proses transaksi ke user.
+
+### C) Laporan
+User bisa melihat:
+- `/laporan_hari_ini`
+- `/laporan_bulan_ini`
+- `/transaksi_terakhir`
+- `/rekap` (mengirim file PDF rekap harian)
 
 ## 3) Cara Kerja Teknis (System Flow)
 - **Transport**: Telegram Bot API (`python-telegram-bot`)
 - **AI Extractor**: `LlamaCppReceiptExtractor`
+- **Voice Transcriber**: `VoiceTranscriber` (`openai-whisper`, default model `tiny`, language `id`)
 - **Database**: SQLite via SQLAlchemy
 - **Parser**: `json_utils` untuk menghapus code fence dan ekstrak JSON dari output campuran
+- **PDF Report**: `report_service.generate_daily_pdf()` menggunakan `fpdf2`
 
 ### Integrasi AI Lokal
 - Base URL default: `http://localhost:8000/v1`
 - Endpoint: `POST /chat/completions`
-- Payload vision:
-  - text prompt
-  - `image_url` berupa data URL base64 (`data:image/jpeg;base64,...`)
+- Payload bisa dua mode:
+  - **Vision mode** (foto): text prompt + `image_url` data URL base64 (`data:image/jpeg;base64,...`)
+  - **Text mode** (voice): text prompt + teks hasil transkripsi
 - Model field wajib dikirim dari `LLAMACPP_MODEL` (default `local-qwen3-vl`)
 
 ### Referensi Model & Dokumentasi llama.cpp
@@ -42,7 +56,7 @@ Expense Agent adalah Telegram Bot untuk mencatat pengeluaran pribadi dari foto s
 - Jika Anda tidak memakai alias, ubah `LLAMACPP_MODEL` ke nama model yang benar-benar tersedia di endpoint `/v1/models`.
 
 ### Aturan Tanggal Transaksi
-- `transaction_date` (kolom utama laporan) = **tanggal upload struk**.
+- `transaction_date` (kolom utama laporan) = **tanggal upload struk/voice**.
 - Tanggal struk asli tetap disimpan di `raw_json.transaction.date`.
 - Jika tanggal struk tidak terbaca, `raw_json.transaction.date` diisi tanggal upload.
 
@@ -52,6 +66,9 @@ Expense Agent adalah Telegram Bot untuk mencatat pengeluaran pribadi dari foto s
 3. Model multimodal `.gguf` + `mmproj` tersedia di lokal
 4. Telegram bot token aktif
 5. Port `llama-server` sesuai `LLAMACPP_BASE_URL` di `.env`
+6. Dependency tambahan untuk fitur baru:
+   - `openai-whisper>=20231117`
+   - `fpdf2>=2.8.0`
 
 ## 5) Cara Menjalankan
 
@@ -121,12 +138,17 @@ pytest -q
 ```
 
 ## 6) Troubleshooting Singkat
-- Bot selalu gagal baca struk:
+- Bot selalu gagal baca struk/voice:
   - cek `llama-server` hidup
   - cek `LLAMACPP_BASE_URL` dan port
   - cek format output model (JSON valid atau tidak)
+- Voice note gagal diproses:
+  - cek dependency `openai-whisper` terpasang
+  - cek file audio berhasil terunduh ke `uploads/`
 - Menu command tidak muncul:
   - restart bot (karena command didaftarkan saat startup)
+- Laporan PDF gagal dibuat:
+  - cek dependency `fpdf2`
+  - cek permission write ke folder `uploads/`
 - Laporan kosong:
   - pastikan transaksi tersimpan untuk user Telegram yang sama
-

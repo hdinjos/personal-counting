@@ -27,6 +27,7 @@ class BotHandlers:
         upload_dir: Path,
         timezone: str = "Asia/Jakarta",
         allowed_user_ids: list[int] | None = None,
+        enable_user_whitelist: bool = False,
     ) -> None:
         self.transaction_service = transaction_service
         self.report_service = report_service
@@ -34,11 +35,19 @@ class BotHandlers:
         self.voice_transcriber = voice_transcriber
         self.upload_dir = upload_dir
         self.timezone = timezone
-        self.allowed_user_ids = allowed_user_ids
+        self.allowed_user_ids = allowed_user_ids or []
+        self.enable_user_whitelist = enable_user_whitelist
+
+        if self.enable_user_whitelist and not self.allowed_user_ids:
+            logger.warning("User whitelist is enabled but ALLOWED_USER_IDS is empty. All users will be blocked.")
 
     def _is_allowed(self, user_id: int) -> bool:
-        if not self.allowed_user_ids:
+        if not self.enable_user_whitelist:
             return True
+
+        if not self.allowed_user_ids:
+            return False
+
         return user_id in self.allowed_user_ids
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -95,7 +104,7 @@ class BotHandlers:
         await update.message.reply_text("Membuat rekap PDF...")
         today = today_local_date(self.timezone)
         user_id = update.effective_user.id
-        
+
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         filename = f"rekap_{user_id}_{today.strftime('%Y%m%d')}_{uuid.uuid4().hex[:6]}.pdf"
         output_path = self.upload_dir / filename
@@ -107,7 +116,7 @@ class BotHandlers:
                 today,
                 str(output_path),
             )
-            
+
             with open(output_path, "rb") as f:
                 await update.message.reply_document(document=f, filename=f"Rekap_Pengeluaran_{today.strftime('%Y%m%d')}.pdf")
         except Exception:
@@ -120,21 +129,21 @@ class BotHandlers:
 
         is_photo = bool(update.message.photo)
         is_document = bool(update.message.document)
-        
+
         if not is_photo and not is_document:
             return
-            
+
         if is_document and not (update.message.document.mime_type and update.message.document.mime_type.startswith("image/")):
             return
 
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         user_id = update.effective_user.id
         username = update.effective_user.username
-        
+
         ext = ".jpg"
         if is_document and update.message.document.file_name:
             ext = Path(update.message.document.file_name).suffix or ".jpg"
-            
+
         filename = f"{user_id}_{uuid.uuid4().hex}{ext}"
         destination = self.upload_dir / filename
 
@@ -145,7 +154,7 @@ class BotHandlers:
                 file_id = update.message.photo[-1].file_id
             else:
                 file_id = update.message.document.file_id
-                
+
             telegram_file = await context.bot.get_file(file_id)
             await telegram_file.download_to_drive(custom_path=str(destination))
 
@@ -176,19 +185,19 @@ class BotHandlers:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         user_id = update.effective_user.id
         username = update.effective_user.username
-        
+
         filename = f"{user_id}_{uuid.uuid4().hex}.ogg"
         destination = self.upload_dir / filename
 
         try:
             msg = await update.message.reply_text("Mendengarkan suara...")
-            
+
             telegram_file = await context.bot.get_file(update.message.voice.file_id)
             await telegram_file.download_to_drive(custom_path=str(destination))
 
             await msg.edit_text("Mengubah suara ke teks...")
             transcribed_text = await self.voice_transcriber.transcribe(str(destination))
-            
+
             if not transcribed_text:
                 await msg.edit_text("Maaf, tidak dapat mendengar atau mengenali pesan suara tersebut.")
                 return
@@ -208,4 +217,3 @@ class BotHandlers:
         except Exception:
             logger.exception("Failed to process voice note")
             await update.message.reply_text("Maaf, terjadi kesalahan saat memproses pesan suara.")
-

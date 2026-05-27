@@ -56,7 +56,7 @@ def build_application() -> Application:
     transaction_service = TransactionService(repository, settings.timezone)
     report_service = ReportService(repository)
     voice_transcriber = VoiceTranscriber(model_name="tiny")
-    
+
     handlers = BotHandlers(
         transaction_service=transaction_service,
         report_service=report_service,
@@ -65,6 +65,7 @@ def build_application() -> Application:
         upload_dir=settings.upload_dir,
         timezone=settings.timezone,
         allowed_user_ids=settings.allowed_user_ids,
+        enable_user_whitelist=settings.enable_user_whitelist,
     )
 
     application = (
@@ -92,4 +93,3 @@ def run() -> None:
     app = build_application()
     logger.info("Bot starting...")
     app.run_polling()
-
