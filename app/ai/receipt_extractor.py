@@ -91,16 +91,27 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         if not image_file.exists():
             return _failed_payload("Image file not found")
 
-        try:
-            data_url = self._build_data_url(image_file)
-            payload = self._build_payload(data_url)
+        import time
 
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.post(f"{self.base_url}/chat/completions", json=payload)
-                response.raise_for_status()
-                raw = response.json()
-        except Exception as exc:  # noqa: BLE001
-            return _failed_payload(str(exc))
+        data_url = self._build_data_url(image_file)
+        payload = self._build_payload(data_url)
+
+        max_retries = 3
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=self.timeout_seconds) as client:
+                    response = client.post(f"{self.base_url}/chat/completions", json=payload)
+                    response.raise_for_status()
+                    raw = response.json()
+                    break
+            except Exception as exc:  # noqa: BLE001
+                last_exception = exc
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+        else:
+            return _failed_payload(f"Failed after {max_retries} attempts. Last error: {last_exception}")
 
         content = self._extract_content(raw)
         parsed = extract_json_from_text(content)

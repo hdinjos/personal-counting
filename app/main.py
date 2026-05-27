@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from telegram import BotCommand
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from app.ai.receipt_extractor import DummyReceiptExtractor, LlamaCppReceiptExtractor
 from app.bot.handlers import BotHandlers
@@ -73,6 +73,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("laporan_bulan_ini", handlers.laporan_bulan_ini))
     application.add_handler(CommandHandler("transaksi_terakhir", handlers.transaksi_terakhir))
     application.add_handler(MessageHandler(filters.PHOTO, handlers.handle_photo))
+    application.add_handler(CallbackQueryHandler(handlers.handle_callback))
     return application
 
 

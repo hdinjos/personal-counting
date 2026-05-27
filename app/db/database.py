@@ -30,11 +30,24 @@ def init_engine(database_url: str) -> Engine:
 
 
 def init_db() -> None:
-    from app.db.models import Transaction, TransactionItem  # noqa: F401
+    """Jalankan Alembic migrations hingga revision terbaru (upgrade head).
+
+    Dipanggil otomatis saat bot startup sehingga schema selalu up-to-date
+    tanpa perlu menjalankan `alembic upgrade head` secara manual.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
 
     if engine is None:
         raise RuntimeError("Engine has not been initialized. Call init_engine first.")
-    Base.metadata.create_all(bind=engine)
+
+    project_root = Path(__file__).resolve().parents[2]
+    alembic_cfg = Config(str(project_root / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(project_root / "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
+    command.upgrade(alembic_cfg, "head")
 
 
 @contextmanager

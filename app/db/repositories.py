@@ -5,8 +5,8 @@ from contextlib import AbstractContextManager
 from datetime import date
 from typing import Any, Callable, Iterable
 
-from sqlalchemy import Select, and_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import Select, and_, func, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.database import session_scope
 from app.db.models import Transaction, TransactionItem
@@ -100,7 +100,56 @@ class TransactionRepository:
         )
         return self._fetch_transactions(stmt)
 
+    def delete_transaction(self, telegram_user_id: int, transaction_id: int) -> bool:
+        stmt = select(Transaction).where(
+            and_(
+                Transaction.id == transaction_id,
+                Transaction.telegram_user_id == telegram_user_id
+            )
+        )
+        with self.session_factory() as session:
+            tx = session.scalar(stmt)
+            if not tx:
+                return False
+            session.delete(tx)
+            return True
+
+    def get_daily_summary(self, telegram_user_id: int, target_date: date) -> tuple[int, int]:
+        stmt = (
+            select(func.count(Transaction.id), func.sum(Transaction.total))
+            .where(
+                and_(
+                    Transaction.telegram_user_id == telegram_user_id,
+                    Transaction.transaction_date == target_date,
+                )
+            )
+        )
+        with self.session_factory() as session:
+            row = session.execute(stmt).first()
+            if row:
+                return row[0] or 0, row[1] or 0
+            return 0, 0
+
+    def get_monthly_summary(self, telegram_user_id: int, year: int, month: int) -> tuple[int, int]:
+        month_start, month_end = month_date_bounds(year, month)
+        stmt = (
+            select(func.count(Transaction.id), func.sum(Transaction.total))
+            .where(
+                and_(
+                    Transaction.telegram_user_id == telegram_user_id,
+                    Transaction.transaction_date >= month_start,
+                    Transaction.transaction_date < month_end,
+                )
+            )
+        )
+        with self.session_factory() as session:
+            row = session.execute(stmt).first()
+            if row:
+                return row[0] or 0, row[1] or 0
+            return 0, 0
+
     def _fetch_transactions(self, stmt: Select[tuple[Transaction]]) -> list[Transaction]:
+        stmt = stmt.options(selectinload(Transaction.items))
         with self.session_factory() as session:
             return list(session.scalars(stmt).all())
 

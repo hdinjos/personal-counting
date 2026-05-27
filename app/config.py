@@ -31,6 +31,21 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _resolve_database_url(url: str) -> str:
+    """Resolve SQLite relative path terhadap PROJECT_ROOT.
+
+    sqlite:///relative.db   → 3 slash = relative ke CWD (tidak konsisten)
+    sqlite:////absolute.db  → 4 slash = absolute path (konsisten)
+    """
+    prefix = "sqlite:///"
+    absolute_prefix = "sqlite:////"
+    if url.startswith(prefix) and not url.startswith(absolute_prefix):
+        relative_path = url[len(prefix):]
+        absolute_path = PROJECT_ROOT / relative_path
+        return f"sqlite:///{absolute_path}"
+    return url
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     upload_dir = Path(os.getenv("UPLOAD_DIR", "uploads"))
@@ -41,7 +56,7 @@ def get_settings() -> Settings:
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         llamacpp_base_url=os.getenv("LLAMACPP_BASE_URL", "http://localhost:8000/v1").rstrip("/"),
         llamacpp_model=os.getenv("LLAMACPP_MODEL", "local-qwen3-vl"),
-        database_url=os.getenv("DATABASE_URL", "sqlite:///expense-agent.db"),
+        database_url=_resolve_database_url(os.getenv("DATABASE_URL", "sqlite:///expense-agent.db")),
         upload_dir=upload_dir,
         use_dummy_extractor=_env_bool("USE_DUMMY_EXTRACTOR", False),
         extractor_backend=os.getenv("EXTRACTOR_BACKEND", "llamacpp").lower(),

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
+from sqlalchemy import BigInteger, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -12,7 +12,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    telegram_user_id: Mapped[int] = mapped_column(Integer, index=True)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     telegram_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     store_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     transaction_date: Mapped[date] = mapped_column(Date, index=True)
@@ -21,7 +21,7 @@ class Transaction(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     image_path: Mapped[str] = mapped_column(String(512), nullable=False)
     raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     items: Mapped[list["TransactionItem"]] = relationship(
         "TransactionItem",

@@ -35,6 +35,15 @@ class TransactionService:
         extracted_payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
         normalized = self.normalize_extraction(extracted_payload or {})
+        return self.store_normalized(telegram_user_id, telegram_username, image_path, normalized)
+
+    def store_normalized(
+        self,
+        telegram_user_id: int,
+        telegram_username: str | None,
+        image_path: str,
+        normalized: dict[str, Any],
+    ) -> dict[str, Any]:
         status = normalized["status"]
         if status == "failed":
             return {"status": "failed", "message": normalized.get("message")}

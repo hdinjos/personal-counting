@@ -10,19 +10,19 @@ class ReportService:
         self.repository = repository
 
     def get_daily_report(self, telegram_user_id: int, target_date: date) -> dict:
-        transactions = self.repository.get_transactions_for_day(telegram_user_id, target_date)
+        count, total = self.repository.get_daily_summary(telegram_user_id, target_date)
         return {
             "date": target_date.strftime("%Y-%m-%d"),
-            "count": len(transactions),
-            "total": sum(tx.total for tx in transactions),
+            "count": count,
+            "total": total,
         }
 
     def get_monthly_report(self, telegram_user_id: int, year: int, month: int) -> dict:
-        transactions = self.repository.get_transactions_for_month(telegram_user_id, year, month)
+        count, total = self.repository.get_monthly_summary(telegram_user_id, year, month)
         return {
             "month": f"{year:04d}-{month:02d}",
-            "count": len(transactions),
-            "total": sum(tx.total for tx in transactions),
+            "count": count,
+            "total": total,
         }
 
     def get_last_transactions(self, telegram_user_id: int, limit: int = 5) -> dict:

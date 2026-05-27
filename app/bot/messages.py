@@ -77,7 +77,23 @@ def format_last_transactions(report: dict) -> str:
     lines = ["5 transaksi terakhir:"]
     for tx in transactions:
         lines.append(
-            f"- {tx['date']} | {tx['store_name']} | {format_rupiah(tx['total'])} ({tx['status']})"
+            f"#{tx['id']} | {tx['date']} | {tx['store_name']} | {format_rupiah(tx['total'])} ({tx['status']})"
         )
+    lines.append("\nKlik tombol di bawah ini untuk menghapus transaksi tertentu:")
     return "\n".join(lines)
+
+def format_save_confirmation(result: dict) -> str:
+    status = result.get("status", "failed")
+    if status == "failed":
+        return FAILED_RECEIPT_MESSAGE
+
+    text = (
+        "🔍 **Hasil Ekstraksi Struk**\n\n"
+        f"Toko: {result.get('store_name') or '-'}\n"
+        f"Tanggal: {result.get('date') or '-'}\n"
+        f"Total: {format_rupiah(result.get('total'))}\n"
+        f"Status: {status}\n\n"
+        "Apakah Anda ingin menyimpan transaksi ini?"
+    )
+    return text
 
