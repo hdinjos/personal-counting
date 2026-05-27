@@ -59,6 +59,7 @@ def build_application() -> Application:
         extractor=extractor,
         upload_dir=settings.upload_dir,
         timezone=settings.timezone,
+        allowed_user_ids=settings.allowed_user_ids,
     )
 
     application = (
@@ -72,7 +73,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("laporan_hari_ini", handlers.laporan_hari_ini))
     application.add_handler(CommandHandler("laporan_bulan_ini", handlers.laporan_bulan_ini))
     application.add_handler(CommandHandler("transaksi_terakhir", handlers.transaksi_terakhir))
-    application.add_handler(MessageHandler(filters.PHOTO, handlers.handle_photo))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handlers.handle_photo))
     return application
 
 

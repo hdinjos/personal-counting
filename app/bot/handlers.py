@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -24,23 +25,32 @@ class BotHandlers:
         extractor,
         upload_dir: Path,
         timezone: str = "Asia/Jakarta",
+        allowed_user_ids: list[int] | None = None,
     ) -> None:
         self.transaction_service = transaction_service
         self.report_service = report_service
         self.extractor = extractor
         self.upload_dir = upload_dir
         self.timezone = timezone
+        self.allowed_user_ids = allowed_user_ids
+
+    def _is_allowed(self, user_id: int) -> bool:
+        if not self.allowed_user_ids:
+            return True
+        return user_id in self.allowed_user_ids
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if update.message:
-            await update.message.reply_text(messages.START_MESSAGE)
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
+            return
+        await update.message.reply_text(messages.START_MESSAGE)
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if update.message:
-            await update.message.reply_text(messages.HELP_MESSAGE)
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
+            return
+        await update.message.reply_text(messages.HELP_MESSAGE)
 
     async def laporan_hari_ini(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.message or not update.effective_user:
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
             return
 
         today = today_local_date(self.timezone)
@@ -52,7 +62,7 @@ class BotHandlers:
         await update.message.reply_text(messages.format_daily_report(report))
 
     async def laporan_bulan_ini(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.message or not update.effective_user:
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
             return
 
         today = today_local_date(self.timezone)
@@ -66,7 +76,7 @@ class BotHandlers:
         await update.message.reply_text(messages.format_monthly_report(report))
 
     async def transaksi_terakhir(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.message or not update.effective_user:
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
             return
 
         report = await asyncio.to_thread(
@@ -77,24 +87,41 @@ class BotHandlers:
         await update.message.reply_text(messages.format_last_transactions(report))
 
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.message or not update.effective_user or not update.message.photo:
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
+            return
+
+        is_photo = bool(update.message.photo)
+        is_document = bool(update.message.document)
+        
+        if not is_photo and not is_document:
+            return
+            
+        if is_document and not (update.message.document.mime_type and update.message.document.mime_type.startswith("image/")):
             return
 
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         user_id = update.effective_user.id
         username = update.effective_user.username
-        timestamp = int(datetime.now().timestamp() * 1000)
-        filename = f"{user_id}_{timestamp}.jpg"
+        
+        ext = ".jpg"
+        if is_document and update.message.document.file_name:
+            ext = Path(update.message.document.file_name).suffix or ".jpg"
+            
+        filename = f"{user_id}_{uuid.uuid4().hex}{ext}"
         destination = self.upload_dir / filename
 
         try:
             await update.message.reply_text("Sedang memproses struk...")
 
-            largest_photo = update.message.photo[-1]
-            telegram_file = await context.bot.get_file(largest_photo.file_id)
+            if is_photo:
+                file_id = update.message.photo[-1].file_id
+            else:
+                file_id = update.message.document.file_id
+                
+            telegram_file = await context.bot.get_file(file_id)
             await telegram_file.download_to_drive(custom_path=str(destination))
 
-            extracted = await asyncio.to_thread(self.extractor.extract, str(destination))
+            extracted = await self.extractor.extract(str(destination))
             result = await asyncio.to_thread(
                 self.transaction_service.process_and_store,
                 user_id,

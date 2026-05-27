@@ -22,6 +22,7 @@ class Settings:
     extractor_backend: str
     request_timeout_seconds: int
     timezone: str
+    allowed_user_ids: list[int]
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -47,5 +48,6 @@ def get_settings() -> Settings:
         extractor_backend=os.getenv("EXTRACTOR_BACKEND", "llamacpp").lower(),
         request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "120")),
         timezone=os.getenv("TZ", "Asia/Jakarta"),
+        allowed_user_ids=[int(u.strip()) for u in os.getenv("ALLOWED_USER_IDS", "").split(",") if u.strip().isdigit()],
     )
 

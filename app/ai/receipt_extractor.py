@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import mimetypes
 from abc import ABC, abstractmethod
 from datetime import date
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from PIL import Image
 
 from app.ai.prompts import RECEIPT_EXTRACTION_PROMPT
 from app.utils.json_utils import extract_json_from_text
@@ -40,12 +42,12 @@ def _failed_payload(message: str = "Extractor error") -> dict[str, Any]:
 
 class BaseReceiptExtractor(ABC):
     @abstractmethod
-    def extract(self, image_path: str) -> dict[str, Any]:
+    async def extract(self, image_path: str) -> dict[str, Any]:
         raise NotImplementedError
 
 
 class DummyReceiptExtractor(BaseReceiptExtractor):
-    def extract(self, image_path: str) -> dict[str, Any]:
+    async def extract(self, image_path: str) -> dict[str, Any]:
         _ = image_path
         return {
             "status": "success",
@@ -86,7 +88,7 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         self.model = model
         self.timeout_seconds = timeout_seconds
 
-    def extract(self, image_path: str) -> dict[str, Any]:
+    async def extract(self, image_path: str) -> dict[str, Any]:
         image_file = Path(image_path)
         if not image_file.exists():
             return _failed_payload("Image file not found")
@@ -95,8 +97,8 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
             data_url = self._build_data_url(image_file)
             payload = self._build_payload(data_url)
 
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.post(f"{self.base_url}/chat/completions", json=payload)
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.post(f"{self.base_url}/chat/completions", json=payload)
                 response.raise_for_status()
                 raw = response.json()
         except Exception as exc:  # noqa: BLE001
@@ -152,6 +154,22 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
     def _build_data_url(image_file: Path) -> str:
         mime, _ = mimetypes.guess_type(str(image_file))
         mime = mime or "image/jpeg"
-        encoded = base64.b64encode(image_file.read_bytes()).decode("ascii")
+        
+        # Resize image if it's too large
+        with Image.open(image_file) as img:
+            max_size = 1280
+            if max(img.width, img.height) > max_size:
+                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                buffer = io.BytesIO()
+                # Determine format based on mime or default to JPEG
+                fmt = "PNG" if mime == "image/png" else "JPEG"
+                if img.mode != "RGB" and fmt == "JPEG":
+                    img = img.convert("RGB")
+                img.save(buffer, format=fmt, quality=85)
+                image_bytes = buffer.getvalue()
+            else:
+                image_bytes = image_file.read_bytes()
+
+        encoded = base64.b64encode(image_bytes).decode("ascii")
         return f"data:{mime};base64,{encoded}"
 
