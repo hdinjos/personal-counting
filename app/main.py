@@ -6,6 +6,7 @@ from telegram import BotCommand
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
 
 from app.ai.receipt_extractor import DummyReceiptExtractor, LlamaCppReceiptExtractor
+from app.ai.voice_transcriber import VoiceTranscriber
 from app.bot.handlers import BotHandlers
 from app.config import get_settings
 from app.db.database import init_db, init_engine
@@ -21,6 +22,7 @@ BOT_COMMANDS = [
     BotCommand("laporan_hari_ini", "Lihat laporan pengeluaran hari ini"),
     BotCommand("laporan_bulan_ini", "Lihat laporan pengeluaran bulan ini"),
     BotCommand("transaksi_terakhir", "Lihat transaksi terbaru"),
+    BotCommand("rekap", "Buat laporan harian (PDF)"),
 ]
 
 
@@ -53,10 +55,13 @@ def build_application() -> Application:
     repository = TransactionRepository()
     transaction_service = TransactionService(repository, settings.timezone)
     report_service = ReportService(repository)
+    voice_transcriber = VoiceTranscriber(model_name="tiny")
+    
     handlers = BotHandlers(
         transaction_service=transaction_service,
         report_service=report_service,
         extractor=extractor,
+        voice_transcriber=voice_transcriber,
         upload_dir=settings.upload_dir,
         timezone=settings.timezone,
         allowed_user_ids=settings.allowed_user_ids,
@@ -73,7 +78,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("laporan_hari_ini", handlers.laporan_hari_ini))
     application.add_handler(CommandHandler("laporan_bulan_ini", handlers.laporan_bulan_ini))
     application.add_handler(CommandHandler("transaksi_terakhir", handlers.transaksi_terakhir))
+    application.add_handler(CommandHandler("rekap", handlers.rekap_command))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handlers.handle_photo))
+    application.add_handler(MessageHandler(filters.VOICE, handlers.handle_voice))
     return application
 
 

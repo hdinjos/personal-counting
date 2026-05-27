@@ -38,4 +38,44 @@ class ReportService:
             for tx in transactions
         ]
         return {"transactions": formatted}
+    def generate_daily_pdf(self, telegram_user_id: int, target_date: date, output_path: str) -> None:
+        from fpdf import FPDF
+        
+        transactions = self.repository.get_transactions_for_day(telegram_user_id, target_date)
+        
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("helvetica", size=16, style="B")
+        pdf.cell(200, 10, txt=f"Laporan Transaksi Harian", ln=True, align="C")
+        pdf.set_font("helvetica", size=12)
+        pdf.cell(200, 10, txt=f"Tanggal: {target_date.strftime('%Y-%m-%d')}", ln=True, align="C")
+        pdf.ln(10)
 
+        pdf.set_font("helvetica", size=10, style="B")
+        pdf.cell(10, 10, "No", border=1, align="C")
+        pdf.cell(70, 10, "Toko/Keterangan", border=1)
+        pdf.cell(30, 10, "Status", border=1, align="C")
+        pdf.cell(40, 10, "Total", border=1, align="R")
+        pdf.ln(10)
+
+        pdf.set_font("helvetica", size=10)
+        total_pengeluaran = 0
+        for i, tx in enumerate(transactions, start=1):
+            store_name = tx.store_name if tx.store_name else "-"
+            # Basic sanitization to avoid fpdf latin-1 errors
+            store_name = store_name.encode('latin-1', 'replace').decode('latin-1')
+            
+            pdf.cell(10, 10, str(i), border=1, align="C")
+            pdf.cell(70, 10, store_name[:35], border=1)
+            pdf.cell(30, 10, tx.status, border=1, align="C")
+            pdf.cell(40, 10, f"Rp {tx.total:,}", border=1, align="R")
+            pdf.ln(10)
+            if tx.status == "success":
+                total_pengeluaran += tx.total
+
+        pdf.ln(5)
+        pdf.set_font("helvetica", size=12, style="B")
+        pdf.cell(110, 10, "Total Pengeluaran (Sukses):", border=0, align="R")
+        pdf.cell(40, 10, f"Rp {total_pengeluaran:,}", border=0, align="R")
+        
+        pdf.output(output_path)

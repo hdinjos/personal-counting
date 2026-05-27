@@ -6,7 +6,7 @@ import mimetypes
 from abc import ABC, abstractmethod
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 from PIL import Image
@@ -42,13 +42,14 @@ def _failed_payload(message: str = "Extractor error") -> dict[str, Any]:
 
 class BaseReceiptExtractor(ABC):
     @abstractmethod
-    async def extract(self, image_path: str) -> dict[str, Any]:
+    async def extract(self, image_path: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
         raise NotImplementedError
 
 
 class DummyReceiptExtractor(BaseReceiptExtractor):
-    async def extract(self, image_path: str) -> dict[str, Any]:
+    async def extract(self, image_path: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
         _ = image_path
+        _ = text_input
         return {
             "status": "success",
             "message": None,
@@ -88,14 +89,19 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         self.model = model
         self.timeout_seconds = timeout_seconds
 
-    async def extract(self, image_path: str) -> dict[str, Any]:
-        image_file = Path(image_path)
-        if not image_file.exists():
-            return _failed_payload("Image file not found")
+    async def extract(self, image_path: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
+        if not image_path and not text_input:
+            return _failed_payload("Either image_path or text_input must be provided")
 
         try:
-            data_url = self._build_data_url(image_file)
-            payload = self._build_payload(data_url)
+            if text_input:
+                payload = self._build_text_payload(text_input)
+            else:
+                image_file = Path(image_path)
+                if not image_file.exists():
+                    return _failed_payload("Image file not found")
+                data_url = self._build_data_url(image_file)
+                payload = self._build_payload(data_url)
 
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(f"{self.base_url}/chat/completions", json=payload)
@@ -123,6 +129,20 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
                         {"type": "text", "text": RECEIPT_EXTRACTION_PROMPT},
                         {"type": "image_url", "image_url": {"url": data_url}},
                     ],
+                },
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2048,
+        }
+
+    def _build_text_payload(self, text_input: str) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "Kamu adalah AI asisten pencatat pengeluaran. Ekstrak data transaksi dari pesan suara/teks yang diberikan pengguna."},
+                {
+                    "role": "user",
+                    "content": f"{RECEIPT_EXTRACTION_PROMPT}\n\nBerikut adalah hasil transkripsi pesan pengguna:\n\n{text_input}",
                 },
             ],
             "temperature": 0.1,
