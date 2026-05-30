@@ -34,7 +34,15 @@ def init_db() -> None:
 
     if engine is None:
         raise RuntimeError("Engine has not been initialized. Call init_engine first.")
-    Base.metadata.create_all(bind=engine)
+
+    from alembic import command
+    from alembic.config import Config
+    from pathlib import Path
+
+    alembic_ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
+    alembic_cfg = Config(str(alembic_ini))
+    alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
+    command.upgrade(alembic_cfg, "head")
 
 
 @contextmanager

@@ -29,9 +29,11 @@ Struktur folder mengikuti spesifikasi Anda:
 ```text
 expense-agent/
 ├── app/
+├── alembic/
 ├── docs/
 ├── uploads/
 ├── tests/
+├── alembic.ini
 ├── CONTRIBUTING.md
 ├── .env.example
 ├── requirements.txt
@@ -74,6 +76,14 @@ Konfigurasi model Unsloth (`unsloth/Qwen3-VL-2B-Instruct-GGUF`) dan contoh comma
 ```bash
 python run.py
 ```
+
+Database migration dijalankan otomatis saat startup. Untuk menjalankan migration secara manual:
+```bash
+source .venv/bin/activate
+alembic upgrade head
+```
+
+Lihat [CONTRIBUTING.md](CONTRIBUTING.md) bagian "Database Migration" untuk aturan lengkap.
 
 ## Testing
 ```bash
