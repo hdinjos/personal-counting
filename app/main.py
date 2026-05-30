@@ -7,6 +7,7 @@ from telegram import BotCommand
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
 
 from app.ai.receipt_extractor import DummyReceiptExtractor, LlamaCppReceiptExtractor
+from app.ai.ocr import PaddleOCREngine
 from app.ai.voice_transcriber import VoiceTranscriber
 from app.bot.handlers import BotHandlers
 from app.config import get_settings
@@ -74,6 +75,7 @@ def build_application() -> Application:
         timeout_seconds=settings.whisper_server_timeout_seconds,
         language=settings.whisper_language,
     )
+    ocr_engine = PaddleOCREngine(lang=settings.ocr_language)
 
     handlers = BotHandlers(
         transaction_service=transaction_service,
@@ -81,6 +83,7 @@ def build_application() -> Application:
         extractor=extractor,
         voice_transcriber=voice_transcriber,
         upload_dir=settings.upload_dir,
+        ocr_engine=ocr_engine,
         timezone=settings.timezone,
         allowed_user_ids=settings.allowed_user_ids,
         enable_user_whitelist=settings.enable_user_whitelist,

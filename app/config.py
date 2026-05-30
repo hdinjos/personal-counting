@@ -20,6 +20,7 @@ class Settings:
     whisper_server_inference_path: str
     whisper_server_timeout_seconds: int
     whisper_language: str
+    ocr_language: str
     database_url: str
     upload_dir: Path
     use_dummy_extractor: bool
@@ -52,6 +53,7 @@ def get_settings() -> Settings:
         whisper_server_inference_path=os.getenv("WHISPER_SERVER_INFERENCE_PATH", "/inference"),
         whisper_server_timeout_seconds=int(os.getenv("WHISPER_SERVER_TIMEOUT_SECONDS", "120")),
         whisper_language=os.getenv("WHISPER_LANGUAGE", "id"),
+        ocr_language=os.getenv("OCR_LANGUAGE", "id"),
         database_url=os.getenv("DATABASE_URL", "sqlite:///expense-agent.db"),
         upload_dir=upload_dir,
         use_dummy_extractor=_env_bool("USE_DUMMY_EXTRACTOR", False),

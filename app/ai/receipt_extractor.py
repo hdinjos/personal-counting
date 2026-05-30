@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import base64
-import io
-import mimetypes
 from abc import ABC, abstractmethod
 from datetime import date
-from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from PIL import Image
 
 from app.ai.prompts import RECEIPT_EXTRACTION_PROMPT
 from app.utils.json_utils import extract_json_from_text
@@ -42,13 +37,13 @@ def _failed_payload(message: str = "Extractor error") -> dict[str, Any]:
 
 class BaseReceiptExtractor(ABC):
     @abstractmethod
-    async def extract(self, image_path: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
+    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
         raise NotImplementedError
 
 
 class DummyReceiptExtractor(BaseReceiptExtractor):
-    async def extract(self, image_path: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
-        _ = image_path
+    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
+        _ = ocr_text
         _ = text_input
         return {
             "status": "success",
@@ -90,20 +85,12 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
 
-    async def extract(self, image_path: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
-        if not image_path and not text_input:
-            return _failed_payload("Either image_path or text_input must be provided")
+    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
+        if not ocr_text and not text_input:
+            return _failed_payload("ocr_text atau text_input harus diisi")
 
         try:
-            if text_input:
-                payload = self._build_text_payload(text_input)
-            else:
-                image_file = Path(image_path)
-                if not image_file.exists():
-                    return _failed_payload("Image file not found")
-                data_url = self._build_data_url(image_file)
-                payload = self._build_payload(data_url)
-
+            payload = self._build_ocr_payload(ocr_text) if ocr_text else self._build_text_payload(text_input)
             raw = await self._request_with_retry(payload)
         except Exception as exc:  # noqa: BLE001
             return _failed_payload(str(exc))
@@ -132,29 +119,13 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
                     await asyncio.sleep(2 ** attempt)
         raise last_exc
 
-    def _build_payload(self, data_url: str) -> dict[str, Any]:
-        return {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": "Kamu adalah AI ekstraktor struk belanja."},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": RECEIPT_EXTRACTION_PROMPT},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
-                },
-            ],
-            "temperature": 0.1,
-            "max_tokens": 2048,
-        }
-
     def _build_text_payload(self, text_input: str) -> dict[str, Any]:
         extra_instruction = (
             "\n\nATURAN TAMBAHAN untuk input teks/suara:\n"
             "- Jika pengguna TIDAK menyebutkan tanggal, isi transaction.date dengan null.\n"
             "- Jika pengguna TIDAK menyebutkan waktu/jam, isi transaction.time dengan null.\n"
-            "- JANGAN mengarang tanggal atau waktu yang tidak disebutkan pengguna."
+            "- JANGAN mengarang tanggal atau waktu yang tidak disebutkan pengguna.\n"
+            "- Jika pengguna menyebut voucher/diskon/potongan, masukkan total pengurangannya ke summary.discount sebagai angka positif."
         )
         return {
             "model": self.model,
@@ -163,6 +134,21 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
                 {
                     "role": "user",
                     "content": f"{RECEIPT_EXTRACTION_PROMPT}{extra_instruction}\n\nBerikut adalah hasil transkripsi pesan pengguna:\n\n{text_input}",
+                },
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2048,
+        }
+
+    def _build_ocr_payload(self, ocr_text: str) -> dict[str, Any]:
+        print(ocr_text)
+        return {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "Kamu adalah AI ekstraktor struk belanja dari teks hasil OCR."},
+                {
+                    "role": "user",
+                    "content": f"{RECEIPT_EXTRACTION_PROMPT}\n\nBerikut teks hasil OCR dari struk:\n\n{ocr_text}",
                 },
             ],
             "temperature": 0.1,
@@ -189,29 +175,3 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
             return "\n".join(texts)
 
         return ""
-
-    @staticmethod
-    def _build_data_url(image_file: Path) -> str:
-        mime, _ = mimetypes.guess_type(str(image_file))
-        mime = mime or "image/jpeg"
-        
-        # Resize image if it's too large
-        with Image.open(image_file) as img:
-            max_size = 1280
-            if max(img.width, img.height) > max_size:
-                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-                buffer = io.BytesIO()
-                # Determine format based on mime or default to JPEG
-                fmt = "PNG" if mime == "image/png" else "JPEG"
-                if img.mode != "RGB" and fmt == "JPEG":
-                    img = img.convert("RGB")
-                img.save(buffer, format=fmt, quality=85)
-                image_bytes = buffer.getvalue()
-                # Update mime to match actual output format
-                mime = "image/png" if fmt == "PNG" else "image/jpeg"
-            else:
-                image_bytes = image_file.read_bytes()
-
-        encoded = base64.b64encode(image_bytes).decode("ascii")
-        return f"data:{mime};base64,{encoded}"
-
