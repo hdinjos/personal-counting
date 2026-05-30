@@ -27,6 +27,34 @@ FAILED_TRANSACTION_MESSAGE = (
 # Backward compatible alias.
 FAILED_RECEIPT_MESSAGE = FAILED_TRANSACTION_MESSAGE
 
+CONFIRM_KEYWORDS = {"ya", "y", "simpan", "ok", "oke", "yes"}
+CANCEL_KEYWORDS = {"batal", "tidak", "no", "cancel"}
+
+
+def format_confirmation_request(data: dict) -> str:
+    """Format extracted data for user confirmation before saving."""
+    lines = ["📋 Data transaksi yang terbaca:\n"]
+    lines.append(f"🏪 Toko: {data.get('store_name') or '-'}")
+    lines.append(f"📅 Tanggal: {data.get('date') or '-'}")
+    if data.get("receipt_date") and data.get("receipt_date") != data.get("date"):
+        lines.append(f"🧾 Tanggal struk: {data['receipt_date']}")
+    lines.append(f"💰 Total: {format_rupiah(data.get('total'))}")
+
+    items = data.get("items", [])
+    if items:
+        lines.append(f"\n📝 Item ({len(items)}):")
+        for item in items[:10]:
+            name = item.get("name") or "-"
+            subtotal = format_rupiah(item.get("subtotal")) if item.get("subtotal") else ""
+            qty = item.get("quantity") or 1
+            lines.append(f"  • {name} x{qty} {subtotal}")
+        if len(items) > 10:
+            lines.append(f"  ... dan {len(items) - 10} item lainnya")
+
+    lines.append("\n✅ Balas *ya* / *simpan* untuk menyimpan")
+    lines.append("❌ Balas *batal* untuk membatalkan")
+    return "\n".join(lines)
+
 
 def format_total_confirmation_request(result: dict) -> str:
     return (

@@ -86,6 +86,7 @@ class TransactionService:
         normalized_payload: dict[str, Any],
         confirmed_total: int,
         upload_date: date | None = None,
+        manual_total_input: bool = True,
     ) -> dict[str, Any]:
         total = normalize_amount(confirmed_total)
         if total is None or total <= 0:
@@ -102,8 +103,9 @@ class TransactionService:
             item_subtotal = self._calculate_items_subtotal(normalized)
             normalized["summary"]["subtotal"] = item_subtotal if item_subtotal is not None else total
         normalized["status"] = "success"
-        normalized["manual_total_input"] = True
-        normalized["message"] = MANUAL_TOTAL_MESSAGE
+        normalized["manual_total_input"] = manual_total_input
+        if manual_total_input:
+            normalized["message"] = MANUAL_TOTAL_MESSAGE
 
         target_upload_date = upload_date or today_local_date(self.timezone)
         if normalized["transaction"]["date"] is None:
@@ -115,7 +117,7 @@ class TransactionService:
             image_path=image_path,
             normalized=normalized,
             upload_date=target_upload_date,
-            manual_total_input=True,
+            manual_total_input=manual_total_input,
         )
 
     def normalize_extraction(self, payload: dict[str, Any]) -> dict[str, Any]:

@@ -21,8 +21,10 @@ from app.utils.health import check_all_services
 logger = logging.getLogger(__name__)
 
 PENDING_TOTAL_KEY = "pending_total_confirmation"
+PENDING_CONFIRMATION_KEY = "pending_confirmation"
 PENDING_TOTAL_TIMEOUT_SECONDS = 600
-CANCEL_KEYWORDS = {"batal", "/batal"}
+CANCEL_KEYWORDS = {"batal", "/batal", "tidak", "no", "cancel"}
+CONFIRM_KEYWORDS = {"ya", "y", "simpan", "ok", "oke", "yes"}
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
 
@@ -156,11 +158,11 @@ class BotHandlers:
 
         pending = self._get_pending_confirmation(context)
         if not pending:
-            await update.message.reply_text("Tidak ada transaksi yang menunggu konfirmasi total.")
+            await update.message.reply_text("Tidak ada transaksi yang menunggu konfirmasi.")
             return
 
         self._clear_pending_confirmation(context)
-        await update.message.reply_text("Konfirmasi total dibatalkan. Transaksi tidak disimpan.")
+        await update.message.reply_text("Transaksi dibatalkan. Data tidak disimpan.")
 
     async def handle_pending_total_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
@@ -172,18 +174,65 @@ class BotHandlers:
 
         raw_text = (update.message.text or "").strip()
         lowered = raw_text.lower()
-        if lowered in CANCEL_KEYWORDS:
-            self._clear_pending_confirmation(context)
-            await update.message.reply_text("Konfirmasi total dibatalkan. Transaksi tidak disimpan.")
-            return
 
+        # Check expiry
         if self._is_pending_expired(pending):
             self._clear_pending_confirmation(context)
             await update.message.reply_text(
-                "Konfirmasi total sudah kedaluwarsa. Silakan kirim ulang struk atau voice note."
+                "Konfirmasi sudah kedaluwarsa. Silakan kirim ulang struk atau voice note."
             )
             return
 
+        # Cancel
+        if lowered in CANCEL_KEYWORDS:
+            self._clear_pending_confirmation(context)
+            await update.message.reply_text("Transaksi dibatalkan. Data tidak disimpan.")
+            return
+
+        pending_type = pending.get("type")
+
+        # New confirmation flow: user confirms extracted data
+        if pending_type == "save_transaction":
+            if lowered in CONFIRM_KEYWORDS:
+                await self._save_pending_transaction(update, context, pending)
+            else:
+                await update.message.reply_text(
+                    "Balas *ya* / *simpan* untuk menyimpan, atau *batal* untuk membatalkan.",
+                    parse_mode="Markdown",
+                )
+            return
+
+        # Manual total input (total inconsistent with items)
+        if pending_type == "manual_total":
+            total = normalize_amount(raw_text)
+            if total is None or total <= 0:
+                await update.message.reply_text(
+                    "Nominal tidak valid. Kirim angka total yang benar, atau *batal* untuk membatalkan.",
+                    parse_mode="Markdown",
+                )
+                return
+
+            upload_date = parse_receipt_date(pending.get("upload_date"))
+            try:
+                result = await asyncio.to_thread(
+                    self.transaction_service.store_confirmed_transaction,
+                    update.effective_user.id,
+                    update.effective_user.username,
+                    pending["image_path"],
+                    pending["normalized_payload"],
+                    total,
+                    upload_date,
+                )
+            except Exception:
+                logger.exception("Failed to save with manual total")
+                await update.message.reply_text("Terjadi kesalahan saat menyimpan transaksi.")
+                return
+
+            self._clear_pending_confirmation(context)
+            await update.message.reply_text(messages.format_transaction_result(result))
+            return
+
+        # Legacy: manual total input (needs_total_confirmation)
         total = normalize_amount(raw_text)
         if total is None or total <= 0:
             await update.message.reply_text(
@@ -192,7 +241,6 @@ class BotHandlers:
             return
 
         upload_date = parse_receipt_date(pending.get("upload_date"))
-
         try:
             result = await asyncio.to_thread(
                 self.transaction_service.store_confirmed_transaction,
@@ -205,6 +253,48 @@ class BotHandlers:
             )
         except Exception:
             logger.exception("Failed to confirm manual total")
+            await update.message.reply_text("Terjadi kesalahan saat menyimpan transaksi. Silakan coba lagi.")
+            return
+
+        self._clear_pending_confirmation(context)
+        await update.message.reply_text(messages.format_transaction_result(result))
+
+    async def _save_pending_transaction(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict[str, Any]
+    ) -> None:
+        """Save the pending transaction after user confirms. Check total consistency first."""
+        upload_date = parse_receipt_date(pending.get("upload_date"))
+        normalized = pending["normalized_payload"]
+        normalized["status"] = "success"
+        total = normalized["summary"]["total"]
+
+        # Check if total is consistent with items
+        expected_total = self.transaction_service._calculate_expected_total(normalized)
+        if expected_total is not None and expected_total != total:
+            # Switch to manual total input mode
+            pending["type"] = "manual_total"
+            self._set_pending_confirmation(context, pending)
+            await update.message.reply_text(
+                f"⚠️ Total transaksi ({messages.format_rupiah(total)}) tidak konsisten "
+                f"dengan total item ({messages.format_rupiah(expected_total)}).\n\n"
+                "Balas dengan nominal total yang benar (angka saja), atau *batal* untuk membatalkan.",
+                parse_mode="Markdown",
+            )
+            return
+
+        try:
+            result = await asyncio.to_thread(
+                self.transaction_service.store_confirmed_transaction,
+                update.effective_user.id,
+                update.effective_user.username,
+                pending["image_path"],
+                normalized,
+                total,
+                upload_date,
+                False,
+            )
+        except Exception:
+            logger.exception("Failed to save confirmed transaction")
             await update.message.reply_text("Terjadi kesalahan saat menyimpan transaksi. Silakan coba lagi.")
             return
 
@@ -230,7 +320,6 @@ class BotHandlers:
 
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         user_id = update.effective_user.id
-        username = update.effective_user.username
 
         if is_photo:
             telegram_file_id = update.message.photo[-1].file_id
@@ -241,7 +330,6 @@ class BotHandlers:
         if is_document and update.message.document.file_name:
             ext = Path(update.message.document.file_name).suffix or ".jpg"
 
-        # Download to temp file for AI processing, store file_id as reference
         temp_filename = f"{user_id}_{uuid.uuid4().hex}{ext}"
         temp_path = self.upload_dir / temp_filename
 
@@ -252,14 +340,41 @@ class BotHandlers:
             await telegram_file.download_to_drive(custom_path=str(temp_path))
 
             extracted = await self.extractor.extract(image_path=str(temp_path))
-            result = await asyncio.to_thread(
-                self.transaction_service.process_and_store,
-                user_id,
-                username,
-                telegram_file_id,
-                extracted,
-            )
-            await self._respond_transaction_result(update, context, result, telegram_file_id)
+            normalized = self.transaction_service.normalize_extraction(extracted or {})
+
+            if normalized["status"] == "failed":
+                await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
+                return
+
+            self.transaction_service._apply_defaults(normalized)
+            self.transaction_service._fill_missing_totals(normalized)
+            total = normalized["summary"]["total"]
+
+            if total is None or total <= 0:
+                await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
+                return
+
+            upload_date = today_local_date(self.timezone)
+            receipt_date = normalized["transaction"]["date"] or upload_date
+            normalized["transaction"]["date"] = receipt_date
+
+            confirmation_data = {
+                "store_name": normalized["store"]["name"],
+                "date": upload_date.strftime("%Y-%m-%d"),
+                "receipt_date": receipt_date.strftime("%Y-%m-%d"),
+                "total": total,
+                "items": normalized["items"],
+            }
+
+            pending = {
+                "type": "save_transaction",
+                "image_path": telegram_file_id,
+                "normalized_payload": normalized,
+                "upload_date": upload_date.strftime("%Y-%m-%d"),
+                "created_at_ts": datetime.now().timestamp(),
+            }
+            self._set_pending_confirmation(context, pending)
+            await update.message.reply_text(messages.format_confirmation_request(confirmation_data), parse_mode="Markdown")
         except Exception:
             logger.exception("Failed to process receipt photo")
             await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
@@ -284,10 +399,8 @@ class BotHandlers:
 
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         user_id = update.effective_user.id
-        username = update.effective_user.username
         telegram_file_id = update.message.voice.file_id
 
-        # Download to temp file for transcription, store file_id as reference
         temp_filename = f"{user_id}_{uuid.uuid4().hex}.ogg"
         temp_path = self.upload_dir / temp_filename
 
@@ -307,44 +420,52 @@ class BotHandlers:
             await msg.edit_text(f"Pesan dikenali: \"{transcribed_text}\"\nSedang memproses transaksi...")
 
             extracted = await self.extractor.extract(text_input=transcribed_text)
-            result = await asyncio.to_thread(
-                self.transaction_service.process_and_store,
-                user_id,
-                username,
-                telegram_file_id,
-                extracted,
-            )
+            normalized = self.transaction_service.normalize_extraction(extracted or {})
+
             try:
                 await msg.delete()
             except Exception:
-                logger.debug("Failed to delete status message, ignoring")
-            await self._respond_transaction_result(update, context, result, telegram_file_id)
+                pass
+
+            if normalized["status"] == "failed":
+                await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
+                return
+
+            self.transaction_service._apply_defaults(normalized)
+            self.transaction_service._fill_missing_totals(normalized)
+            total = normalized["summary"]["total"]
+
+            if total is None or total <= 0:
+                await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
+                return
+
+            upload_date = today_local_date(self.timezone)
+            receipt_date = normalized["transaction"]["date"] or upload_date
+            normalized["transaction"]["date"] = receipt_date
+
+            confirmation_data = {
+                "store_name": normalized["store"]["name"],
+                "date": upload_date.strftime("%Y-%m-%d"),
+                "receipt_date": receipt_date.strftime("%Y-%m-%d"),
+                "total": total,
+                "items": normalized["items"],
+            }
+
+            pending = {
+                "type": "save_transaction",
+                "image_path": telegram_file_id,
+                "normalized_payload": normalized,
+                "upload_date": upload_date.strftime("%Y-%m-%d"),
+                "created_at_ts": datetime.now().timestamp(),
+            }
+            self._set_pending_confirmation(context, pending)
+            await update.message.reply_text(messages.format_confirmation_request(confirmation_data), parse_mode="Markdown")
         except Exception:
             logger.exception("Failed to process voice note")
             await update.message.reply_text("Maaf, terjadi kesalahan saat memproses pesan suara.")
         finally:
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
-
-    async def _respond_transaction_result(
-        self,
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-        result: dict[str, Any],
-        image_path: str,
-    ) -> None:
-        if result.get("status") == "needs_total_confirmation":
-            pending = {
-                "image_path": image_path,
-                "normalized_payload": result.get("pending_payload", {}),
-                "upload_date": result.get("date"),
-                "created_at_ts": datetime.now().timestamp(),
-            }
-            self._set_pending_confirmation(context, pending)
-            await update.message.reply_text(messages.format_total_confirmation_request(result))
-            return
-
-        await update.message.reply_text(messages.format_transaction_result(result))
 
     @staticmethod
     def _set_pending_confirmation(context: ContextTypes.DEFAULT_TYPE, pending: dict[str, Any]) -> None:
