@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.db.repositories import TransactionRepository
+from app.utils.dates import format_date_id, format_month_id
 
 
 class ReportService:
@@ -12,7 +13,7 @@ class ReportService:
     def get_daily_report(self, telegram_user_id: int, target_date: date) -> dict:
         transactions = self.repository.get_transactions_for_day(telegram_user_id, target_date)
         return {
-            "date": target_date.strftime("%Y-%m-%d"),
+            "date": format_date_id(target_date),
             "count": len(transactions),
             "total": sum(tx.total for tx in transactions),
         }
@@ -20,7 +21,7 @@ class ReportService:
     def get_monthly_report(self, telegram_user_id: int, year: int, month: int) -> dict:
         transactions = self.repository.get_transactions_for_month(telegram_user_id, year, month)
         return {
-            "month": f"{year:04d}-{month:02d}",
+            "month": format_month_id(year, month),
             "count": len(transactions),
             "total": sum(tx.total for tx in transactions),
         }
@@ -30,7 +31,7 @@ class ReportService:
         formatted = [
             {
                 "id": tx.id,
-                "date": tx.transaction_date.strftime("%Y-%m-%d"),
+                "date": format_date_id(tx.transaction_date, tx.transaction_time),
                 "store_name": tx.store_name or "-",
                 "total": tx.total,
                 "status": tx.status,
@@ -48,7 +49,7 @@ class ReportService:
         pdf.set_font("helvetica", size=16, style="B")
         pdf.cell(200, 10, txt=f"Laporan Transaksi Harian", ln=True, align="C")
         pdf.set_font("helvetica", size=12)
-        pdf.cell(200, 10, txt=f"Tanggal: {target_date.strftime('%Y-%m-%d')}", ln=True, align="C")
+        pdf.cell(200, 10, txt=f"Tanggal: {format_date_id(target_date)}", ln=True, align="C")
         pdf.ln(10)
 
         pdf.set_font("helvetica", size=10, style="B")

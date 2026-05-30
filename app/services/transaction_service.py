@@ -4,7 +4,7 @@ from datetime import date
 from typing import Any
 
 from app.db.repositories import TransactionRepository
-from app.utils.dates import parse_receipt_date, parse_receipt_time, today_local_date
+from app.utils.dates import format_date_id, now_local_time, parse_receipt_date, parse_receipt_time, today_local_date
 from app.utils.money import normalize_amount
 
 ALLOWED_STATUSES = {"success", "partial", "failed"}
@@ -54,14 +54,16 @@ class TransactionService:
         upload_date = today_local_date(self.timezone)
         receipt_date = normalized["transaction"]["date"] or upload_date
         normalized["transaction"]["date"] = receipt_date
+        receipt_time = normalized["transaction"]["time"]
+        upload_time = now_local_time(self.timezone)
 
         expected_total = self._calculate_expected_total(normalized)
         if expected_total is not None and expected_total != total:
             return {
                 "status": STATUS_NEEDS_TOTAL_CONFIRMATION,
                 "store_name": normalized["store"]["name"],
-                "date": upload_date.strftime("%Y-%m-%d"),
-                "receipt_date": receipt_date.strftime("%Y-%m-%d"),
+                "date": format_date_id(upload_date, upload_time),
+                "receipt_date": format_date_id(receipt_date, receipt_time),
                 "total": total,
                 "expected_total": expected_total,
                 "message": "Total transaksi belum konsisten dengan rincian item.",
@@ -182,6 +184,7 @@ class TransactionService:
         receipt_date = normalized["transaction"]["date"] or upload_date
         normalized["transaction"]["date"] = receipt_date
         receipt_time = normalized["transaction"]["time"]
+        upload_time = now_local_time(self.timezone)
         store_name = normalized["store"]["name"] or DEFAULT_STORE_NAME
         total = normalized["summary"]["total"]
         if total is None:
@@ -204,8 +207,8 @@ class TransactionService:
             "status": "success",
             "transaction_id": transaction.id,
             "store_name": store_name,
-            "date": upload_date.strftime("%Y-%m-%d"),
-            "receipt_date": receipt_date.strftime("%Y-%m-%d"),
+            "date": format_date_id(upload_date, upload_time),
+            "receipt_date": format_date_id(receipt_date, receipt_time),
             "total": total,
             "message": normalized.get("message"),
             "manual_total_input": manual_total_input,

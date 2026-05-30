@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes
 from app.bot import messages
 from app.services.report_service import ReportService
 from app.services.transaction_service import TransactionService
-from app.utils.dates import month_from_date, parse_receipt_date, today_local_date
+from app.utils.dates import format_date_id, month_from_date, now_local_time, parse_receipt_date, today_local_date
 from app.utils.money import normalize_amount
 from app.utils.rate_limiter import RateLimiter
 from app.utils.health import check_all_services
@@ -357,11 +357,12 @@ class BotHandlers:
             upload_date = today_local_date(self.timezone)
             receipt_date = normalized["transaction"]["date"] or upload_date
             normalized["transaction"]["date"] = receipt_date
+            upload_time = now_local_time(self.timezone)
 
             confirmation_data = {
                 "store_name": normalized["store"]["name"],
-                "date": upload_date.strftime("%Y-%m-%d"),
-                "receipt_date": receipt_date.strftime("%Y-%m-%d"),
+                "date": format_date_id(upload_date, upload_time),
+                "receipt_date": format_date_id(receipt_date, normalized["transaction"]["time"]),
                 "total": total,
                 "items": normalized["items"],
             }
@@ -440,13 +441,22 @@ class BotHandlers:
                 return
 
             upload_date = today_local_date(self.timezone)
+            upload_time = now_local_time(self.timezone)
+            user_said_date = normalized["transaction"]["date"] is not None
             receipt_date = normalized["transaction"]["date"] or upload_date
             normalized["transaction"]["date"] = receipt_date
 
+            date_display = format_date_id(upload_date, upload_time)
+            receipt_date_display = (
+                format_date_id(receipt_date, normalized["transaction"]["time"])
+                if user_said_date
+                else date_display
+            )
+
             confirmation_data = {
                 "store_name": normalized["store"]["name"],
-                "date": upload_date.strftime("%Y-%m-%d"),
-                "receipt_date": receipt_date.strftime("%Y-%m-%d"),
+                "date": date_display,
+                "receipt_date": receipt_date_display,
                 "total": total,
                 "items": normalized["items"],
             }

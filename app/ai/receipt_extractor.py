@@ -150,13 +150,19 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         }
 
     def _build_text_payload(self, text_input: str) -> dict[str, Any]:
+        extra_instruction = (
+            "\n\nATURAN TAMBAHAN untuk input teks/suara:\n"
+            "- Jika pengguna TIDAK menyebutkan tanggal, isi transaction.date dengan null.\n"
+            "- Jika pengguna TIDAK menyebutkan waktu/jam, isi transaction.time dengan null.\n"
+            "- JANGAN mengarang tanggal atau waktu yang tidak disebutkan pengguna."
+        )
         return {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": "Kamu adalah AI asisten pencatat pengeluaran. Ekstrak data transaksi dari pesan suara/teks yang diberikan pengguna."},
                 {
                     "role": "user",
-                    "content": f"{RECEIPT_EXTRACTION_PROMPT}\n\nBerikut adalah hasil transkripsi pesan pengguna:\n\n{text_input}",
+                    "content": f"{RECEIPT_EXTRACTION_PROMPT}{extra_instruction}\n\nBerikut adalah hasil transkripsi pesan pengguna:\n\n{text_input}",
                 },
             ],
             "temperature": 0.1,

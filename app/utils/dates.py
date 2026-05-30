@@ -4,8 +4,38 @@ from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 
+BULAN_INDONESIA = [
+    "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+]
+
+
+def format_date_id(value: date | str | None, t: time | None = None) -> str:
+    """Format date ke '30 Mei 2026 10:15'. Jika time None, tanpa jam."""
+    if value is None:
+        return "-"
+    if isinstance(value, str):
+        parsed = parse_receipt_date(value)
+        if parsed is None:
+            return value
+        value = parsed
+    result = f"{value.day} {BULAN_INDONESIA[value.month]} {value.year}"
+    if t is not None:
+        result += f" {t.strftime('%H:%M')} WIB"
+    return result
+
+
+def format_month_id(year: int, month: int) -> str:
+    """Format bulan ke 'Mei 2026'."""
+    return f"{BULAN_INDONESIA[month]} {year}"
+
+
 def today_local_date(timezone: str = "Asia/Jakarta") -> date:
     return datetime.now(ZoneInfo(timezone)).date()
+
+
+def now_local_time(timezone: str = "Asia/Jakarta") -> time:
+    return datetime.now(ZoneInfo(timezone)).time().replace(second=0, microsecond=0)
 
 
 def month_from_date(value: date) -> tuple[int, int]:

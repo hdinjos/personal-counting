@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, time
 
 from app.services.transaction_service import (
     DEFAULT_STORE_NAME,
@@ -7,7 +7,7 @@ from app.services.transaction_service import (
     STATUS_NEEDS_TOTAL_CONFIRMATION,
     TransactionService,
 )
-from app.utils.dates import today_local_date
+from app.utils.dates import format_date_id, now_local_time, today_local_date
 
 
 class FakeRepository:
@@ -44,8 +44,8 @@ def test_process_and_store_success_with_default_store_and_quantity() -> None:
     assert result["total"] == 15000
     assert repo.called is True
     assert repo.last_payload["total"] == 15000
-    assert result["date"] == upload_date.strftime("%Y-%m-%d")
-    assert result["receipt_date"] == "2026-05-27"
+    assert result["date"] == format_date_id(upload_date, now_local_time("Asia/Jakarta"))
+    assert result["receipt_date"] == "27 Mei 2026 10:15 WIB"
     assert repo.last_payload["transaction_date"] == upload_date
     assert repo.last_payload["raw_json"]["transaction"]["date"] == date(2026, 5, 27)
     assert repo.last_payload["store_name"] == DEFAULT_STORE_NAME
@@ -68,8 +68,8 @@ def test_process_and_store_generates_receipt_date_when_missing() -> None:
     result = service.process_and_store(1, "user", "uploads/1.jpg", payload)
 
     assert result["status"] == "success"
-    assert result["date"] == upload_date.strftime("%Y-%m-%d")
-    assert result["receipt_date"] == upload_date.strftime("%Y-%m-%d")
+    assert result["date"] == format_date_id(upload_date, now_local_time("Asia/Jakarta"))
+    assert result["receipt_date"] == format_date_id(upload_date, time(9, 0))
     assert repo.last_payload["transaction_date"] == upload_date
     assert repo.last_payload["raw_json"]["transaction"]["date"] == upload_date
 
