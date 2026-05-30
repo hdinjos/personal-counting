@@ -28,6 +28,7 @@ class Settings:
     timezone: str
     enable_user_whitelist: bool
     allowed_user_ids: list[int]
+    enable_startup_health_check: bool
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -59,4 +60,5 @@ def get_settings() -> Settings:
         timezone=os.getenv("TZ", "Asia/Jakarta"),
         enable_user_whitelist=_env_bool("ENABLE_USER_WHITELIST", False),
         allowed_user_ids=[int(u.strip()) for u in os.getenv("ALLOWED_USER_IDS", "").split(",") if u.strip().isdigit()],
+        enable_startup_health_check=_env_bool("ENABLE_STARTUP_HEALTH_CHECK", True),
     )

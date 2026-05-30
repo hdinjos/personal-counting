@@ -15,12 +15,15 @@ from app.services.report_service import ReportService
 from app.services.transaction_service import TransactionService
 from app.utils.dates import month_from_date, parse_receipt_date, today_local_date
 from app.utils.money import normalize_amount
+from app.utils.rate_limiter import RateLimiter
+from app.utils.health import check_all_services
 
 logger = logging.getLogger(__name__)
 
 PENDING_TOTAL_KEY = "pending_total_confirmation"
 PENDING_TOTAL_TIMEOUT_SECONDS = 600
 CANCEL_KEYWORDS = {"batal", "/batal"}
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
 
 class BotHandlers:
@@ -43,6 +46,7 @@ class BotHandlers:
         self.timezone = timezone
         self.allowed_user_ids = allowed_user_ids or []
         self.enable_user_whitelist = enable_user_whitelist
+        self.rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
 
         if self.enable_user_whitelist and not self.allowed_user_ids:
             logger.warning("User whitelist is enabled but ALLOWED_USER_IDS is empty. All users will be blocked.")
@@ -66,6 +70,20 @@ class BotHandlers:
             return
         await update.message.reply_text(messages.HELP_MESSAGE)
 
+    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
+            return
+
+        from app.config import get_settings
+        settings = get_settings()
+        results = await check_all_services(settings.llamacpp_base_url, settings.whisper_server_base_url)
+
+        lines = ["Status server AI:"]
+        for name, healthy in results.items():
+            icon = "✅" if healthy else "❌"
+            lines.append(f"  {icon} {name}")
+        await update.message.reply_text("\n".join(lines))
+
     async def laporan_hari_ini(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
             return
@@ -76,7 +94,7 @@ class BotHandlers:
             update.effective_user.id,
             today,
         )
-        await update.message.reply_text(messages.format_daily_report(report))
+        await self._safe_reply_text(update.message, messages.format_daily_report(report))
 
     async def laporan_bulan_ini(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
@@ -90,7 +108,7 @@ class BotHandlers:
             year,
             month,
         )
-        await update.message.reply_text(messages.format_monthly_report(report))
+        await self._safe_reply_text(update.message, messages.format_monthly_report(report))
 
     async def transaksi_terakhir(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
@@ -101,7 +119,7 @@ class BotHandlers:
             update.effective_user.id,
             5,
         )
-        await update.message.reply_text(messages.format_last_transactions(report))
+        await self._safe_reply_text(update.message, messages.format_last_transactions(report))
 
     async def rekap_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
@@ -128,6 +146,9 @@ class BotHandlers:
         except Exception:
             logger.exception("Failed to generate PDF")
             await update.message.reply_text("Terjadi kesalahan saat membuat laporan PDF.")
+        finally:
+            if output_path.exists():
+                output_path.unlink(missing_ok=True)
 
     async def batal_pending_total(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
@@ -194,6 +215,10 @@ class BotHandlers:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
             return
 
+        if not self.rate_limiter.is_allowed(update.effective_user.id):
+            await update.message.reply_text("Terlalu banyak request. Coba lagi dalam 1 menit.")
+            return
+
         is_photo = bool(update.message.photo)
         is_document = bool(update.message.document)
 
@@ -207,39 +232,47 @@ class BotHandlers:
         user_id = update.effective_user.id
         username = update.effective_user.username
 
+        if is_photo:
+            telegram_file_id = update.message.photo[-1].file_id
+        else:
+            telegram_file_id = update.message.document.file_id
+
         ext = ".jpg"
         if is_document and update.message.document.file_name:
             ext = Path(update.message.document.file_name).suffix or ".jpg"
 
-        filename = f"{user_id}_{uuid.uuid4().hex}{ext}"
-        destination = self.upload_dir / filename
+        # Download to temp file for AI processing, store file_id as reference
+        temp_filename = f"{user_id}_{uuid.uuid4().hex}{ext}"
+        temp_path = self.upload_dir / temp_filename
 
         try:
             await update.message.reply_text("Sedang memproses struk...")
 
-            if is_photo:
-                file_id = update.message.photo[-1].file_id
-            else:
-                file_id = update.message.document.file_id
+            telegram_file = await context.bot.get_file(telegram_file_id)
+            await telegram_file.download_to_drive(custom_path=str(temp_path))
 
-            telegram_file = await context.bot.get_file(file_id)
-            await telegram_file.download_to_drive(custom_path=str(destination))
-
-            extracted = await self.extractor.extract(image_path=str(destination))
+            extracted = await self.extractor.extract(image_path=str(temp_path))
             result = await asyncio.to_thread(
                 self.transaction_service.process_and_store,
                 user_id,
                 username,
-                str(destination),
+                telegram_file_id,
                 extracted,
             )
-            await self._respond_transaction_result(update, context, result, str(destination))
+            await self._respond_transaction_result(update, context, result, telegram_file_id)
         except Exception:
             logger.exception("Failed to process receipt photo")
             await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user or not self._is_allowed(update.effective_user.id):
+            return
+
+        if not self.rate_limiter.is_allowed(update.effective_user.id):
+            await update.message.reply_text("Terlalu banyak request. Coba lagi dalam 1 menit.")
             return
 
         if not update.message.voice:
@@ -252,18 +285,20 @@ class BotHandlers:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         user_id = update.effective_user.id
         username = update.effective_user.username
+        telegram_file_id = update.message.voice.file_id
 
-        filename = f"{user_id}_{uuid.uuid4().hex}.ogg"
-        destination = self.upload_dir / filename
+        # Download to temp file for transcription, store file_id as reference
+        temp_filename = f"{user_id}_{uuid.uuid4().hex}.ogg"
+        temp_path = self.upload_dir / temp_filename
 
         try:
             msg = await update.message.reply_text("Mendengarkan suara...")
 
-            telegram_file = await context.bot.get_file(update.message.voice.file_id)
-            await telegram_file.download_to_drive(custom_path=str(destination))
+            telegram_file = await context.bot.get_file(telegram_file_id)
+            await telegram_file.download_to_drive(custom_path=str(temp_path))
 
             await msg.edit_text("Mengubah suara ke teks...")
-            transcribed_text = await self.voice_transcriber.transcribe(str(destination))
+            transcribed_text = await self.voice_transcriber.transcribe(str(temp_path))
 
             if not transcribed_text:
                 await msg.edit_text("Maaf, tidak dapat mendengar atau mengenali pesan suara tersebut.")
@@ -276,14 +311,20 @@ class BotHandlers:
                 self.transaction_service.process_and_store,
                 user_id,
                 username,
-                str(destination),
+                telegram_file_id,
                 extracted,
             )
-            await msg.delete()
-            await self._respond_transaction_result(update, context, result, str(destination))
+            try:
+                await msg.delete()
+            except Exception:
+                logger.debug("Failed to delete status message, ignoring")
+            await self._respond_transaction_result(update, context, result, telegram_file_id)
         except Exception:
             logger.exception("Failed to process voice note")
             await update.message.reply_text("Maaf, terjadi kesalahan saat memproses pesan suara.")
+        finally:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
 
     async def _respond_transaction_result(
         self,
@@ -326,3 +367,12 @@ class BotHandlers:
         if not isinstance(created_at_ts, (int, float)):
             return True
         return (datetime.now().timestamp() - float(created_at_ts)) > PENDING_TOTAL_TIMEOUT_SECONDS
+
+    @staticmethod
+    async def _safe_reply_text(message, text: str) -> None:
+        """Reply with truncation to respect Telegram's 4096-character limit."""
+        if len(text) <= TELEGRAM_MAX_MESSAGE_LENGTH:
+            await message.reply_text(text)
+        else:
+            truncated = text[: TELEGRAM_MAX_MESSAGE_LENGTH - 30] + "\n\n... (pesan terpotong)"
+            await message.reply_text(truncated)

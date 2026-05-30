@@ -98,6 +98,7 @@ class TransactionService:
 
         normalized["summary"]["total"] = total
         if normalized["summary"]["subtotal"] is None:
+            self._fill_item_subtotals(normalized)
             item_subtotal = self._calculate_items_subtotal(normalized)
             normalized["summary"]["subtotal"] = item_subtotal if item_subtotal is not None else total
         normalized["status"] = "success"
@@ -232,6 +233,7 @@ class TransactionService:
         return normalized["summary"]["total"] is not None
 
     def _fill_missing_totals(self, normalized: dict[str, Any]) -> None:
+        self._fill_item_subtotals(normalized)
         item_subtotal = self._calculate_items_subtotal(normalized)
         summary = normalized["summary"]
 
@@ -250,7 +252,18 @@ class TransactionService:
                 + (summary["service_charge"] or 0)
             )
 
+    @staticmethod
+    def _fill_item_subtotals(normalized: dict[str, Any]) -> None:
+        """Fill in missing item subtotals from unit_price * quantity (mutation)."""
+        for item in normalized["items"]:
+            if not item.get("name"):
+                continue
+            if item.get("subtotal") is None and item.get("unit_price") is not None:
+                quantity = item.get("quantity") or 1.0
+                item["subtotal"] = int(round(item["unit_price"] * quantity))
+
     def _calculate_items_subtotal(self, normalized: dict[str, Any]) -> int | None:
+        """Pure calculation: sum existing item subtotals without mutation."""
         total = 0
         has_value = False
         for item in normalized["items"]:
@@ -258,11 +271,6 @@ class TransactionService:
                 continue
 
             line_subtotal = item.get("subtotal")
-            if line_subtotal is None and item.get("unit_price") is not None:
-                quantity = item.get("quantity") or 1.0
-                line_subtotal = int(round(item["unit_price"] * quantity))
-                item["subtotal"] = line_subtotal
-
             if line_subtotal is None:
                 continue
 

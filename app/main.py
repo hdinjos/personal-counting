@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 
 from telegram import BotCommand
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
@@ -24,6 +25,7 @@ BOT_COMMANDS = [
     BotCommand("transaksi_terakhir", "Lihat transaksi terbaru"),
     BotCommand("rekap", "Buat laporan harian (PDF)"),
     BotCommand("batal", "Batalkan input total manual"),
+    BotCommand("status", "Cek status server AI"),
 ]
 
 
@@ -33,6 +35,16 @@ async def _post_init(application: Application) -> None:
         logger.info("Telegram bot commands registered")
     except Exception:
         logger.exception("Failed to register Telegram bot commands")
+
+    # Health check AI servers at startup
+    from app.utils.health import check_all_services
+
+    settings = get_settings()
+    if settings.enable_startup_health_check:
+        results = await check_all_services(settings.llamacpp_base_url, settings.whisper_server_base_url)
+        for service, healthy in results.items():
+            if not healthy:
+                logger.warning("⚠️  %s server is NOT reachable at startup", service)
 
 
 def build_application() -> Application:
@@ -87,6 +99,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("transaksi_terakhir", handlers.transaksi_terakhir))
     application.add_handler(CommandHandler("rekap", handlers.rekap_command))
     application.add_handler(CommandHandler("batal", handlers.batal_pending_total))
+    application.add_handler(CommandHandler("status", handlers.status))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handlers.handle_photo))
     application.add_handler(MessageHandler(filters.VOICE, handlers.handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_pending_total_text))
@@ -94,9 +107,18 @@ def build_application() -> Application:
 
 
 def run() -> None:
+    from pathlib import Path
+
+    log_file = Path(__file__).resolve().parent.parent / "bot.log"
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         level=logging.INFO,
+        handlers=[
+            logging.StreamHandler(),
+            logging.handlers.RotatingFileHandler(
+                log_file, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+            ),
+        ],
     )
     app = build_application()
     logger.info("Bot starting...")

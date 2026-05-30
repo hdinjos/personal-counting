@@ -84,10 +84,11 @@ class DummyReceiptExtractor(BaseReceiptExtractor):
 
 
 class LlamaCppReceiptExtractor(BaseReceiptExtractor):
-    def __init__(self, base_url: str, model: str, timeout_seconds: int = 120) -> None:
+    def __init__(self, base_url: str, model: str, timeout_seconds: int = 120, max_retries: int = 2) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
 
     async def extract(self, image_path: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
         if not image_path and not text_input:
@@ -103,10 +104,7 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
                 data_url = self._build_data_url(image_file)
                 payload = self._build_payload(data_url)
 
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(f"{self.base_url}/chat/completions", json=payload)
-                response.raise_for_status()
-                raw = response.json()
+            raw = await self._request_with_retry(payload)
         except Exception as exc:  # noqa: BLE001
             return _failed_payload(str(exc))
 
@@ -117,6 +115,22 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         if "status" not in parsed:
             parsed["status"] = "failed"
         return parsed
+
+    async def _request_with_retry(self, payload: dict[str, Any]) -> dict[str, Any]:
+        import asyncio
+
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                    response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+                    response.raise_for_status()
+                    return response.json()
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
+                last_exc = exc
+                if attempt < self.max_retries:
+                    await asyncio.sleep(2 ** attempt)
+        raise last_exc
 
     def _build_payload(self, data_url: str) -> dict[str, Any]:
         return {
@@ -187,6 +201,8 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
                     img = img.convert("RGB")
                 img.save(buffer, format=fmt, quality=85)
                 image_bytes = buffer.getvalue()
+                # Update mime to match actual output format
+                mime = "image/png" if fmt == "PNG" else "image/jpeg"
             else:
                 image_bytes = image_file.read_bytes()
 
