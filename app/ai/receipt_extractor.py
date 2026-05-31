@@ -141,14 +141,25 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         }
 
     def _build_ocr_payload(self, ocr_text: str) -> dict[str, Any]:
-        print(ocr_text)
+        ocr_instruction = (
+            "\n\nATURAN TAMBAHAN untuk teks hasil OCR:\n"
+            "- Teks berasal dari OCR struk, urutannya sudah diatur per baris (kiri→kanan, atas→bawah).\n"
+            "- Mungkin ada salah baca karakter (mis. O↔0, l/I↔1, S↔5, 'lotal'→'Total', 'Me1'→'Mei'). Perbaiki bila konteksnya jelas, TAPI jangan mengarang data.\n"
+            "- Dalam satu baris, nama item biasanya di kiri dan harga/qty di kanan; pasangkan item dengan harga/subtotal pada baris yang sama.\n"
+            "- Angka nominal PALING KANAN pada baris item adalah SUBTOTAL baris (sudah termasuk kuantitas) → isikan ke item.subtotal; JANGAN mengalikannya lagi dengan quantity.\n"
+            "- Anggap sebuah angka sebagai unit_price HANYA bila muncul dalam pola 'qty x harga', 'qty × harga', atau '@harga'. Jika tidak ada pola itu, hitung unit_price = subtotal / quantity.\n"
+            "- Jumlah seluruh item.subtotal seharusnya sama dengan Subtotal/Total yang tertera. Jika hasil penjumlahanmu jauh lebih besar dari total tertera, kemungkinan kamu tertukar unit_price dengan subtotal — perbaiki.\n"
+            "- summary.total = nominal akhir yang BENAR-BENAR DIBAYAR (cari baris seperti 'TOTAL BELANJA', 'NON TUNAI', 'TUNAI', 'TOTAL BAYAR', 'BAYAR'); gunakan nilai itu apa adanya.\n"
+            "- PPN/pajak pada struk ritel/minimarket umumnya SUDAH TERMASUK dalam harga (baris seperti 'PPN', 'DPP', 'PB1' hanya rincian). Jika begitu, isi summary.tax = null dan JANGAN menambahkan PPN ke total. Isi summary.tax HANYA jika pajak jelas DITAMBAHKAN terpisah di atas subtotal.\n"
+            "- Abaikan baris yang jelas bukan data transaksi (mis. ucapan terima kasih, jam buka, alamat website)."
+        )
         return {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": "Kamu adalah AI ekstraktor struk belanja dari teks hasil OCR."},
                 {
                     "role": "user",
-                    "content": f"{RECEIPT_EXTRACTION_PROMPT}\n\nBerikut teks hasil OCR dari struk:\n\n{ocr_text}",
+                    "content": f"{RECEIPT_EXTRACTION_PROMPT}{ocr_instruction}\n\nBerikut teks hasil OCR dari struk:\n\n{ocr_text}",
                 },
             ],
             "temperature": 0.1,

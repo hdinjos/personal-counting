@@ -19,7 +19,7 @@ Telegram bot pencatat pengeluaran dari **foto struk** dan **voice note** menggun
 | HTTP client | httpx | ~0.28.1 |
 | PDF export | fpdf2 | ~2.8.7 |
 | Image processing | Pillow | ~10.4.0 |
-| OCR struk | PaddleOCR (+paddlepaddle) | ~2.9.1 |
+| OCR struk | PaddleOCR (+paddlepaddle) | ~3.6.0 |
 | Env | python-dotenv | ~1.2.2 |
 | Test | pytest + pytest-asyncio | ~8.4.2 |
 | AI Vision/Text | llama.cpp (llama-server) | external |
@@ -237,9 +237,14 @@ Setiap transaksi (foto/voice) **tidak langsung disimpan**. Bot menampilkan data 
 - Response parsing: `extract_json_from_text()` (handle code fence, partial JSON)
 
 ### `PaddleOCREngine` (app/ai/ocr.py)
-- Wrapper PaddleOCR untuk baca teks dari gambar struk
+- Wrapper PaddleOCR **3.x** untuk baca teks dari gambar struk
 - Model di-lazy load saat `extract_text()` pertama dipanggil (hemat startup)
-- `lang` dari `OCR_LANGUAGE` (default `id` → model latin); `extract_text()` return teks gabungan
+- Konstruktor: `use_textline_orientation=True`, `use_doc_orientation_classify=False`, `use_doc_unwarping=False`, `enable_mkldnn=False`, `text_rec_score_thresh=0.5`
+  - `enable_mkldnn=False` WAJIB: paddlepaddle 3.x CPU crash oneDNN (`ConvertPirAttribute2RuntimeAttribute`) saat `.predict()` bila MKLDNN aktif
+  - `text_rec_score_thresh=0.5` membuang hasil low-confidence (noise) agar tidak mengganggu interpretasi llama
+- Inferensi pakai `.predict(image_path)`; teks diambil dari `res["rec_texts"]`
+- **Rekonstruksi layout**: `extract_text()` mengelompokkan deteksi per baris via koordinat box (`rec_boxes`/`rec_polys`) — deteksi pada baris vertikal yang sama digabung & diurutkan kiri→kanan (join dua spasi, antar baris newline), supaya nama item tetap sebaris dengan harga (mengurangi kerugian layout vs vision)
+- `lang` dari `OCR_LANGUAGE` (default `id`; fallback otomatis ke `latin` bila lang tak didukung)
 
 ### `VoiceTranscriber` (app/ai/voice_transcriber.py)
 - Client untuk whisper.cpp `whisper-server`
