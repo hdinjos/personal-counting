@@ -1,7 +1,7 @@
 RECEIPT_EXTRACTION_PROMPT = """
 Kamu adalah AI OCR dan ekstraktor data struk belanja.
 
-Baca gambar struk belanja yang diberikan, lalu ekstrak informasi pengeluaran dari struk tersebut.
+Baca data struk belanja yang diberikan (dapat berupa teks hasil OCR maupun catatan suara), lalu ekstrak informasi pengeluaran dari struk tersebut.
 
 Kembalikan hasil hanya dalam JSON valid.
 Jangan gunakan markdown.
@@ -56,19 +56,30 @@ Aturan ekstraksi:
 6. Tanggal harus format YYYY-MM-DD.
 7. Waktu harus format HH:mm.
 8. Jika tahun tidak terlihat di struk, gunakan tahun berjalan dari konteks sistem jika tersedia.
-9. Jika total belanja ditemukan, masukkan ke summary.total.
-10. Jika subtotal item tersedia, masukkan ke item.subtotal.
-11. Jika kategori tidak yakin, isi dengan "lainnya".
-12. Kategori yang boleh digunakan:
+9. Jika subtotal item tersedia, masukkan ke item.subtotal.
+10. summary.discount diisi dengan TOTAL semua pengurangan harga: voucher, diskon, discount, potongan, promo, cashback, atau pengurangan lainnya. Jika ada lebih dari satu pengurangan, JUMLAHKAN semuanya menjadi satu angka.
+11. Nilai summary.discount harus berupa angka POSITIF yang mewakili besar pengurangan. Jika tidak ada pengurangan, isi 0 atau null.
+12. Voucher/diskon selalu MENGURANGI total. Hitung summary.total dengan rumus: total = (subtotal seluruh item) - discount + tax + service_charge.
+13. summary.total adalah nominal akhir yang benar-benar dibayar pelanggan setelah dikurangi voucher/diskon. Jika total akhir sudah tertera jelas di struk, gunakan nilai itu apa adanya dan tetap isi summary.discount agar konsisten.
+14. Jika kategori tidak yakin, isi dengan "lainnya".
+15. Kategori yang boleh digunakan:
     - sembako
     - makanan
     - minuman
+    - jajanan & kopi
     - kebersihan
     - perlengkapan rumah
-    - transportasi
+    - elektronik
+    - pakaian
+    - perawatan diri
     - kesehatan
+    - transportasi
     - pendidikan
-    - tagihan
+    - hiburan
+    - tagihan & utilitas
+    - pulsa & internet
+    - anak & bayi
+    - hadiah & donasi
     - lainnya
 """.strip()
 

@@ -7,6 +7,8 @@ from telegram import BotCommand
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
 
 from app.ai.receipt_extractor import DummyReceiptExtractor, LlamaCppReceiptExtractor
+from app.ai.ocr import PaddleOCREngine
+from app.ai.glm_ocr import LlamaCppOCREngine
 from app.ai.voice_transcriber import VoiceTranscriber
 from app.bot.handlers import BotHandlers
 from app.config import get_settings
@@ -74,6 +76,22 @@ def build_application() -> Application:
         timeout_seconds=settings.whisper_server_timeout_seconds,
         language=settings.whisper_language,
     )
+    ocr_engine = None
+    if settings.ocr_backend == "vlm_llamacpp":
+        ocr_engine = None  # VLM: extractor handles image directly
+    elif settings.ocr_backend == "glm_ocr_llamacpp":
+        ocr_engine = LlamaCppOCREngine(
+            base_url=settings.glm_ocr_base_url,
+            model=settings.glm_ocr_model,
+            prompt=settings.glm_ocr_prompt,
+            timeout_seconds=settings.glm_ocr_timeout_seconds,
+            max_tokens=settings.glm_ocr_max_tokens,
+        )
+    elif settings.ocr_backend == "paddleocr":
+        ocr_engine = PaddleOCREngine(lang=settings.ocr_language)
+    else:
+        logger.warning("Unknown OCR_BACKEND=%r, falling back to PaddleOCR", settings.ocr_backend)
+        ocr_engine = PaddleOCREngine(lang=settings.ocr_language)
 
     handlers = BotHandlers(
         transaction_service=transaction_service,
@@ -81,6 +99,7 @@ def build_application() -> Application:
         extractor=extractor,
         voice_transcriber=voice_transcriber,
         upload_dir=settings.upload_dir,
+        ocr_engine=ocr_engine,
         timezone=settings.timezone,
         allowed_user_ids=settings.allowed_user_ids,
         enable_user_whitelist=settings.enable_user_whitelist,

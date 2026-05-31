@@ -16,12 +16,20 @@ ALLOWED_CATEGORIES = {
     "sembako",
     "makanan",
     "minuman",
+    "jajanan & kopi",
     "kebersihan",
     "perlengkapan rumah",
-    "transportasi",
+    "elektronik",
+    "pakaian",
+    "perawatan diri",
     "kesehatan",
+    "transportasi",
     "pendidikan",
-    "tagihan",
+    "hiburan",
+    "tagihan & utilitas",
+    "pulsa & internet",
+    "anak & bayi",
+    "hadiah & donasi",
     "lainnya",
 }
 
@@ -290,12 +298,54 @@ class TransactionService:
             return None
 
         summary = normalized["summary"]
-        return (
-            subtotal_from_items
-            - (summary["discount"] or 0)
-            + (summary["tax"] or 0)
-            + (summary["service_charge"] or 0)
-        )
+        total = summary["total"]
+
+        # Auto-koreksi double-counting: jika model mengalikan qty × harga padahal harga
+        # sudah merupakan subtotal baris. Deteksi: sum(subtotals) >> total, tapi sum(unit_prices) ≈ total.
+        if total is not None and subtotal_from_items > total * 1.5:
+            unit_price_sum = sum(
+                item["unit_price"] for item in normalized["items"]
+                if item.get("name") and item.get("unit_price") is not None
+            )
+            discount = summary["discount"] or 0
+            if unit_price_sum > 0 and abs(unit_price_sum - discount - total) <= total * 0.05:
+                # Model salah kalikan — unit_price sebenarnya adalah subtotal
+                for item in normalized["items"]:
+                    if item.get("name") and item.get("unit_price") is not None:
+                        item["subtotal"] = item["unit_price"]
+                        qty = item.get("quantity") or 1.0
+                        item["unit_price"] = int(round(item["subtotal"] / qty))
+                subtotal_from_items = self._calculate_items_subtotal(normalized)
+
+        discount = summary["discount"] or 0
+        tax = summary["tax"] or 0
+        service_charge = summary["service_charge"] or 0
+
+        # Jika total tanpa tax sudah cocok dengan summary.total, berarti tax sudah
+        # inklusif (umum di struk ritel/minimarket). Nullify tax agar tidak double-count.
+        total_without_tax = subtotal_from_items - discount + service_charge
+        if tax and total is not None and total_without_tax == total:
+            summary["tax"] = None
+            tax = 0
+
+        # Jika total > items_subtotal - discount (tanpa tax), berarti ada pajak terpisah
+        # yang tidak terdeteksi model. Infer tax dari selisih (umum di restoran/cafe).
+        # Hanya jika tax = None (model tidak mengisi), bukan jika tax = 0 (model eksplisit bilang tidak ada).
+        if summary["tax"] is None and total is not None and total > total_without_tax:
+            inferred_tax = total - total_without_tax
+            if inferred_tax <= subtotal_from_items * 0.2:
+                summary["tax"] = inferred_tax
+                tax = inferred_tax
+
+        # Jika items_subtotal - discount != total, tapi selisih wajar sebagai discount, koreksi.
+        expected = subtotal_from_items - discount + tax + service_charge
+        if total is not None and expected != total:
+            actual_discount = subtotal_from_items + tax + service_charge - total
+            if actual_discount > 0 and actual_discount <= subtotal_from_items * 0.5:
+                summary["discount"] = actual_discount
+                discount = actual_discount
+
+        return subtotal_from_items - discount + tax + service_charge
 
     @staticmethod
     def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:

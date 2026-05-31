@@ -96,3 +96,52 @@ pytest
 - Request extractor diarahkan ke `LLAMACPP_BASE_URL`
 - Field `model` extractor selalu dikirim menggunakan `LLAMACPP_MODEL` (default: `local-qwen3-vl`)
 - Request transkripsi diarahkan ke `WHISPER_SERVER_BASE_URL + WHISPER_SERVER_INFERENCE_PATH`
+
+## OCR Backend
+
+Bot mendukung tiga backend OCR:
+
+### PaddleOCR (default)
+Tidak perlu konfigurasi tambahan. PaddleOCR aktif secara default. Gambar di-preprocess (grayscale, autocontrast, denoise, sharpen) sebelum OCR untuk menangani shadow/bayangan.
+
+### GLM-OCR via llama.cpp
+GLM-OCR adalah model vision yang membaca teks dari gambar struk via `llama-server` (OpenAI-compatible API). Hasil OCR berupa teks/markdown yang kemudian diinterpretasi oleh LLM extractor.
+
+Untuk mengaktifkan, tambahkan di `.env`:
+```env
+OCR_BACKEND=glm_ocr_llamacpp
+GLM_OCR_BASE_URL=http://127.0.0.1:8002/v1
+GLM_OCR_MODEL=glm-ocr
+```
+
+Jalankan `llama-server` untuk GLM-OCR (di terminal terpisah):
+```bash
+llama-server \
+  -hf ggml-org/GLM-OCR-GGUF:Q8_0 \
+  --host 127.0.0.1 \
+  --port 8002 \
+  --alias glm-ocr \
+  -c 8192 \
+  -np 1 \
+  --temp 0.1 \
+  --top-k 1 \
+  --top-p 1.0 \
+  --timeout 120 \
+  --no-ui
+```
+
+> **Catatan**: Parameter di atas (`-hf`, `--host`, `--port`, dll.) adalah parameter saat menjalankan `llama-server`, bukan konfigurasi `.env` bot. Bot hanya perlu tahu `GLM_OCR_BASE_URL` dan `GLM_OCR_MODEL` untuk mengirim request.
+
+### VLM (Vision Language Model) via llama.cpp
+VLM mengirim gambar struk langsung ke model multimodal (mis. Qwen3-VL) yang membaca dan mengekstrak data transaksi dalam satu langkah — tanpa OCR terpisah. Gambar di-preprocess (autocontrast RGB + resize) sebelum dikirim.
+
+Untuk mengaktifkan, tambahkan di `.env`:
+```env
+OCR_BACKEND=vlm_llamacpp
+```
+
+VLM menggunakan `LLAMACPP_BASE_URL` dan `LLAMACPP_MODEL` yang sama dengan extractor. Model harus multimodal (mendukung input gambar).
+
+> **Catatan**: VLM cocok untuk struk tulisan tangan atau kondisi foto yang sulit dibaca PaddleOCR. Membutuhkan model multimodal seperti `Qwen3-VL`.
+
+Jika server tidak aktif, bot tidak crash — user menerima pesan gagal seperti biasa.

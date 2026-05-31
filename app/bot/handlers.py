@@ -36,6 +36,7 @@ class BotHandlers:
         extractor,
         voice_transcriber,
         upload_dir: Path,
+        ocr_engine=None,
         timezone: str = "Asia/Jakarta",
         allowed_user_ids: list[int] | None = None,
         enable_user_whitelist: bool = False,
@@ -45,6 +46,7 @@ class BotHandlers:
         self.extractor = extractor
         self.voice_transcriber = voice_transcriber
         self.upload_dir = upload_dir
+        self.ocr_engine = ocr_engine
         self.timezone = timezone
         self.allowed_user_ids = allowed_user_ids or []
         self.enable_user_whitelist = enable_user_whitelist
@@ -339,7 +341,16 @@ class BotHandlers:
             telegram_file = await context.bot.get_file(telegram_file_id)
             await telegram_file.download_to_drive(custom_path=str(temp_path))
 
-            extracted = await self.extractor.extract(image_path=str(temp_path))
+            if self.ocr_engine:
+                # PaddleOCR / GLM-OCR path
+                ocr_text = await asyncio.to_thread(self.ocr_engine.extract_text, str(temp_path))
+                if not ocr_text:
+                    await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
+                    return
+                extracted = await self.extractor.extract(ocr_text=ocr_text)
+            else:
+                # VLM path: extractor reads image directly
+                extracted = await self.extractor.extract(image_path=str(temp_path))
             normalized = self.transaction_service.normalize_extraction(extracted or {})
 
             if normalized["status"] == "failed":
