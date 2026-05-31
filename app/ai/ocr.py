@@ -8,6 +8,38 @@ from PIL import Image, ImageFilter, ImageOps
 logger = logging.getLogger(__name__)
 
 
+def preprocess_for_ocr(image_path: str) -> str | None:
+    """Grayscale + autocontrast + denoise + sharpen — optimal untuk PaddleOCR."""
+    try:
+        img = Image.open(image_path)
+        img = ImageOps.grayscale(img)
+        img = ImageOps.autocontrast(img, cutoff=1)
+        img = img.filter(ImageFilter.MedianFilter(size=3))
+        img = img.filter(ImageFilter.SHARPEN)
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        img.save(tmp.name)
+        return tmp.name
+    except Exception:
+        logger.debug("preprocess_for_ocr gagal", exc_info=True)
+        return None
+
+
+def preprocess_for_vlm(image_path: str, max_side: int = 1536) -> str | None:
+    """Autocontrast (tetap RGB) + resize — optimal untuk model vision."""
+    try:
+        img = Image.open(image_path).convert("RGB")
+        img = ImageOps.autocontrast(img, cutoff=2)
+        # Resize jika terlalu besar (hemat token/memory)
+        if max(img.size) > max_side:
+            img.thumbnail((max_side, max_side), Image.LANCZOS)
+        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        img.save(tmp.name, quality=90)
+        return tmp.name
+    except Exception:
+        logger.debug("preprocess_for_vlm gagal", exc_info=True)
+        return None
+
+
 class PaddleOCREngine:
     """Wrapper PaddleOCR 3.x untuk membaca teks dari gambar struk (lazy load model).
 
@@ -68,18 +100,8 @@ class PaddleOCREngine:
 
     @staticmethod
     def _preprocess_image(image_path: str) -> str | None:
-        """Grayscale + autocontrast + sharpen untuk mengurangi efek shadow."""
-        try:
-            img = Image.open(image_path)
-            img = ImageOps.grayscale(img)
-            img = ImageOps.autocontrast(img, cutoff=1)
-            img = img.filter(ImageFilter.SHARPEN)
-            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-            img.save(tmp.name)
-            return tmp.name
-        except Exception:
-            logger.debug("Preprocessing gagal, gunakan gambar asli", exc_info=True)
-            return None
+        """Grayscale + autocontrast + denoise + sharpen untuk mengurangi shadow dan noise."""
+        return preprocess_for_ocr(image_path)
 
     @staticmethod
     def _boxes(res) -> list[tuple[float, float, float]]:

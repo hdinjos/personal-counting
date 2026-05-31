@@ -1,7 +1,7 @@
 # AGENTS
 
 > Dokumen ini adalah referensi lengkap proyek **Expense Agent** agar agent berikutnya bisa langsung bekerja tanpa membaca seluruh codebase.
-> Terakhir diperbarui: 30 Mei 2026.
+> Terakhir diperbarui: 31 Mei 2026.
 
 ---
 
@@ -61,7 +61,7 @@ expense-agent/
 │   │   ├── models.py        # Transaction, TransactionItem (SQLAlchemy ORM)
 │   │   └── repositories.py  # TransactionRepository (CRUD)
 │   └── utils/
-│       ├── json_utils.py    # remove_code_fence, safe_parse_json, extract_json_from_text
+│       ├── json_utils.py    # remove_code_fence, safe_parse_json, extract_json_from_text, _eval_arithmetic_values
 │       ├── money.py         # normalize_amount, format_rupiah
 │       ├── dates.py         # parse_receipt_date/time, format_date_id, today_local_date
 │       ├── health.py        # check_server_health, check_all_services
@@ -105,6 +105,12 @@ WHISPER_SERVER_INFERENCE_PATH=/inference
 WHISPER_SERVER_TIMEOUT_SECONDS=120
 WHISPER_LANGUAGE=id
 OCR_LANGUAGE=id               # bahasa model PaddleOCR (id→latin model)
+OCR_BACKEND=paddleocr         # "paddleocr" | "glm_ocr_llamacpp" | "vlm_llamacpp"
+GLM_OCR_BASE_URL=http://127.0.0.1:8002/v1
+GLM_OCR_MODEL=glm-ocr
+GLM_OCR_PROMPT=OCR markdown. Preserve receipt line order from top to bottom. Do not add explanations.
+GLM_OCR_TIMEOUT_SECONDS=120
+GLM_OCR_MAX_TOKENS=4096
 USE_DUMMY_EXTRACTOR=false
 DATABASE_URL=sqlite:///expense-agent.db
 UPLOAD_DIR=uploads
@@ -157,15 +163,16 @@ TZ=Asia/Jakarta
 ### A) Foto Struk
 1. User upload foto → `handle_photo`
 2. File disimpan sementara ke `uploads/{user_id}_{uuid}.jpg`
-3. `PaddleOCREngine.extract_text(image_path)`:
-   - Jalankan PaddleOCR (lazy load model) di thread terpisah
-   - Return teks gabungan hasil OCR (satu baris per deteksi)
-   - Jika `ocr_engine` None atau teks OCR kosong → transaksi gagal (tidak ada fallback)
-4. `LlamaCppReceiptExtractor.extract(ocr_text=...)`:
-   - POST teks OCR ke `{LLAMACPP_BASE_URL}/chat/completions` (text payload, `_build_ocr_payload`)
-   - llama menginterpretasi teks OCR menjadi JSON transaksi
-   - Parse JSON dari response
-5. `TransactionService.normalize_extraction()` → validasi + normalisasi
+3. Routing berdasarkan `OCR_BACKEND`:
+   - **`paddleocr`** (default): `PaddleOCREngine.extract_text(image_path)` → preprocessing (grayscale, autocontrast, denoise, sharpen) → OCR → layout reconstruction → teks
+   - **`glm_ocr_llamacpp`**: kirim gambar ke GLM-OCR llama-server → return teks/markdown
+   - **`vlm_llamacpp`**: skip OCR, langsung ke step 4 dengan `image_path`
+4. `LlamaCppReceiptExtractor.extract(...)`:
+   - Jika `ocr_text` → `_build_ocr_payload` (text mode)
+   - Jika `image_path` (VLM) → `_build_vision_payload` (preprocessing VLM + base64 + vision prompt)
+   - POST ke `{LLAMACPP_BASE_URL}/chat/completions`
+   - Parse JSON dari response (handle code fence, ekspresi aritmatika)
+5. `TransactionService.normalize_extraction()` → validasi + normalisasi + auto-koreksi
 6. Bot kirim **konfirmasi** ke user (tampilkan data terbaca)
 7. User balas "ya"/"simpan" → `_save_pending_transaction` → simpan ke DB
 8. User balas "batal" → data dibuang
@@ -225,16 +232,21 @@ Setiap transaksi (foto/voice) **tidak langsung disimpan**. Bot menampilkan data 
 - `normalize_extraction(payload)` → normalisasi output AI ke format standar
 - `_apply_defaults(normalized)` → isi default (store name, quantity)
 - `_fill_missing_totals(normalized)` → hitung total dari item jika tidak ada
-- `_calculate_expected_total(normalized)` → validasi konsistensi total vs item
+- `_calculate_expected_total(normalized)` → validasi konsistensi total vs item, dengan auto-koreksi:
+  - **Double-counting fix**: jika sum(subtotals) > total×1.5 dan sum(unit_prices) ≈ total → model salah kalikan qty×harga, koreksi subtotal = unit_price
+  - **Inclusive tax fix**: jika items - discount == total dan tax non-zero → tax sudah inklusif, nullify
+  - **Tax inference**: jika tax=None dan total > items - discount, dan gap ≤ 20% → infer tax (restoran/cafe)
+  - **Discount correction**: jika expected ≠ total dan selisih wajar (≤ 50%) → koreksi discount
 - `store_confirmed_transaction(...)` → simpan setelah user konfirmasi
 - `_has_minimum_transaction_data(normalized)` → cek minimal ada item bernama + harga
 
 ### `LlamaCppReceiptExtractor` (app/ai/receipt_extractor.py)
 - Retry logic: max 2 retry dengan exponential backoff
-- `extract(ocr_text|text_input)` — dua mode payload (text-only, TANPA vision):
-  - `ocr_text` → struk hasil OCR (`_build_ocr_payload`, prompt struk biasa)
+- `extract(ocr_text|text_input|image_path)` — tiga mode payload:
+  - `ocr_text` → struk hasil OCR (`_build_ocr_payload`, prompt struk + instruksi OCR error)
   - `text_input` → voice/teks (`_build_text_payload`, jangan karang tanggal/waktu)
-- Response parsing: `extract_json_from_text()` (handle code fence, partial JSON)
+  - `image_path` → VLM vision (`_build_vision_payload`, preprocessing VLM + base64 + vision prompt)
+- Response parsing: `extract_json_from_text()` (handle code fence, partial JSON, ekspresi aritmatika)
 
 ### `PaddleOCREngine` (app/ai/ocr.py)
 - Wrapper PaddleOCR **3.x** untuk baca teks dari gambar struk
@@ -242,9 +254,16 @@ Setiap transaksi (foto/voice) **tidak langsung disimpan**. Bot menampilkan data 
 - Konstruktor: `use_textline_orientation=True`, `use_doc_orientation_classify=False`, `use_doc_unwarping=False`, `enable_mkldnn=False`, `text_rec_score_thresh=0.5`
   - `enable_mkldnn=False` WAJIB: paddlepaddle 3.x CPU crash oneDNN (`ConvertPirAttribute2RuntimeAttribute`) saat `.predict()` bila MKLDNN aktif
   - `text_rec_score_thresh=0.5` membuang hasil low-confidence (noise) agar tidak mengganggu interpretasi llama
+- **Preprocessing** (`preprocess_for_ocr`): grayscale → autocontrast (cutoff=1) → MedianFilter (denoise) → sharpen. Menghilangkan efek shadow/bayangan pada foto.
+- **Noise filter** (`_filter_noise`): buang deteksi ≤3 karakter yang x-position-nya di luar IQR area struk (menghilangkan noise dari latar belakang, mis. keyboard keys).
 - Inferensi pakai `.predict(image_path)`; teks diambil dari `res["rec_texts"]`
-- **Rekonstruksi layout**: `extract_text()` mengelompokkan deteksi per baris via koordinat box (`rec_boxes`/`rec_polys`) — deteksi pada baris vertikal yang sama digabung & diurutkan kiri→kanan (join dua spasi, antar baris newline), supaya nama item tetap sebaris dengan harga (mengurangi kerugian layout vs vision)
+- **Rekonstruksi layout**: `_layout_text()` mengelompokkan deteksi per baris via koordinat box (`rec_boxes`/`rec_polys`) — deteksi pada baris vertikal yang sama digabung & diurutkan kiri→kanan (join dua spasi, antar baris newline), supaya nama item tetap sebaris dengan harga (mengurangi kerugian layout vs vision)
+- **Orphan merge**: jika baris hanya berisi angka dan baris sebelumnya berakhir `:`, gabungkan (fix "NON TUNAI :" terpisah dari nilainya)
 - `lang` dari `OCR_LANGUAGE` (default `id`; fallback otomatis ke `latin` bila lang tak didukung)
+
+### Standalone preprocessing functions (app/ai/ocr.py)
+- `preprocess_for_ocr(image_path)` → grayscale + autocontrast + denoise + sharpen (optimal PaddleOCR)
+- `preprocess_for_vlm(image_path, max_side=1536)` → autocontrast RGB + resize (optimal model vision)
 
 ### `VoiceTranscriber` (app/ai/voice_transcriber.py)
 - Client untuk whisper.cpp `whisper-server`
@@ -354,10 +373,11 @@ pytest -q
 - Awalnya auto-save. Sekarang wajib konfirmasi user sebelum simpan.
 - Mencegah data salah masuk DB tanpa review user.
 
-### 6) Foto struk: vision → OCR (PaddleOCR) + llama text
+### 6) Foto struk: vision → OCR (PaddleOCR) + llama text → multi-backend
 - Awalnya foto struk dikirim langsung ke llama vision (multimodal).
 - Diubah: PaddleOCR (bahasa `id`) baca teks dari gambar, lalu teks OCR diinterpretasi llama (text mode, `_build_ocr_payload`).
-- **Vision llama dihapus total** — extractor hanya menerima text (`ocr_text`/`text_input`). Jika OCR kosong → transaksi gagal, tidak ada fallback.
+- Kemudian ditambahkan kembali opsi VLM (`OCR_BACKEND=vlm_llamacpp`) — gambar di-preprocess lalu dikirim langsung ke model multimodal (Qwen3-VL) via `_build_vision_payload`.
+- Sekarang ada 3 backend: `paddleocr` (default), `glm_ocr_llamacpp`, `vlm_llamacpp`.
 - Voice tetap pakai whisper → llama text (tidak berubah).
 
 ---

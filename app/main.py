@@ -77,7 +77,9 @@ def build_application() -> Application:
         language=settings.whisper_language,
     )
     ocr_engine = None
-    if settings.ocr_backend == "glm_ocr_llamacpp":
+    if settings.ocr_backend == "vlm_llamacpp":
+        ocr_engine = None  # VLM: extractor handles image directly
+    elif settings.ocr_backend == "glm_ocr_llamacpp":
         ocr_engine = LlamaCppOCREngine(
             base_url=settings.glm_ocr_base_url,
             model=settings.glm_ocr_model,

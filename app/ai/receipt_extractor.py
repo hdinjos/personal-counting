@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
+import os
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import Any, Optional
 
 import httpx
 
+from app.ai.ocr import preprocess_for_vlm
 from app.ai.prompts import RECEIPT_EXTRACTION_PROMPT
 from app.utils.json_utils import extract_json_from_text
 
@@ -37,14 +40,15 @@ def _failed_payload(message: str = "Extractor error") -> dict[str, Any]:
 
 class BaseReceiptExtractor(ABC):
     @abstractmethod
-    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
+    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None, image_path: Optional[str] = None) -> dict[str, Any]:
         raise NotImplementedError
 
 
 class DummyReceiptExtractor(BaseReceiptExtractor):
-    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
+    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None, image_path: Optional[str] = None) -> dict[str, Any]:
         _ = ocr_text
         _ = text_input
+        _ = image_path
         return {
             "status": "success",
             "message": None,
@@ -85,12 +89,17 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
 
-    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None) -> dict[str, Any]:
-        if not ocr_text and not text_input:
-            return _failed_payload("ocr_text atau text_input harus diisi")
+    async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None, image_path: Optional[str] = None) -> dict[str, Any]:
+        if not ocr_text and not text_input and not image_path:
+            return _failed_payload("ocr_text, text_input, atau image_path harus diisi")
 
         try:
-            payload = self._build_ocr_payload(ocr_text) if ocr_text else self._build_text_payload(text_input)
+            if image_path:
+                payload = self._build_vision_payload(image_path)
+            elif ocr_text:
+                payload = self._build_ocr_payload(ocr_text)
+            else:
+                payload = self._build_text_payload(text_input)
             raw = await self._request_with_retry(payload)
         except Exception as exc:  # noqa: BLE001
             return _failed_payload(str(exc))
@@ -165,6 +174,48 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
                 {
                     "role": "user",
                     "content": f"{RECEIPT_EXTRACTION_PROMPT}{ocr_instruction}\n\nBerikut teks hasil OCR dari struk:\n\n{ocr_text}",
+                },
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2048,
+        }
+
+    def _build_vision_payload(self, image_path: str) -> dict[str, Any]:
+        processed = preprocess_for_vlm(image_path)
+        target = processed or image_path
+        try:
+            with open(target, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+        finally:
+            if processed:
+                try:
+                    os.unlink(processed)
+                except OSError:
+                    pass
+
+        vision_instruction = (
+            "\n\nATURAN TAMBAHAN untuk foto struk:\n"
+            "- Kamu melihat foto struk langsung. Baca semua item, harga, dan total dengan teliti.\n"
+            "- PENTING: Angka harga di KANAN setiap baris item adalah SUBTOTAL BARIS (sudah termasuk kuantitas), BUKAN harga satuan. Isikan langsung ke item.subtotal. Hitung unit_price = subtotal / quantity. JANGAN mengalikan harga dengan quantity.\n"
+            "- Validasi: jumlah semua item.subtotal harus SAMA dengan Total/Subtotal yang tertera di struk. Jika tidak cocok, kemungkinan kamu salah mengalikan — perbaiki.\n"
+            "- Baris VOUCHER/DISKON/angka dalam tanda kurung (mis. (6,600)) adalah potongan harga — JUMLAHKAN SEMUA potongan ke summary.discount sebagai satu angka positif. JANGAN masukkan sebagai item.\n"
+            "- summary.total = nominal akhir yang BENAR-BENAR DIBAYAR (TOTAL BELANJA / NON TUNAI / TUNAI / Total Bayar).\n"
+            "- PPN pada struk ritel/minimarket (Indomaret, Alfamart) SUDAH TERMASUK dalam harga → isi summary.tax = null. TAPI jika ada baris 'Pajak'/'Tax'/'PB1' yang DITAMBAHKAN terpisah (Subtotal + Pajak = Total, umum di restoran/cafe), isi summary.tax dengan angka pajak tersebut.\n"
+            "- Baris 'HARGA JUAL' bukan total bayar. Abaikan.\n"
+            "- 'ANDA HEMAT' menunjukkan total penghematan — ini SAMA dengan summary.discount. JANGAN isi ke service_charge. service_charge = null kecuali ada baris eksplisit 'service charge' atau 'biaya layanan'.\n"
+            "- summary.subtotal = jumlah semua item.subtotal SEBELUM dikurangi voucher/diskon.\n"
+            "- Rumus: summary.total = summary.subtotal - summary.discount."
+        )
+        return {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "Kamu adalah AI ekstraktor struk belanja dari foto."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                        {"type": "text", "text": f"{RECEIPT_EXTRACTION_PROMPT}{vision_instruction}"},
+                    ],
                 },
             ],
             "temperature": 0.1,

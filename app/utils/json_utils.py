@@ -37,6 +37,21 @@ def safe_parse_json(text: str) -> dict:
     return {}
 
 
+def _eval_arithmetic_values(text: str) -> str:
+    """Ganti ekspresi aritmatika sederhana (mis. '13700 + 25500 + 8200') dengan hasilnya."""
+    def _eval_match(m: re.Match) -> str:
+        expr = m.group(0)
+        try:
+            # Hanya izinkan digit, +, -, spasi
+            if re.fullmatch(r"[\d+\-\s]+", expr):
+                return str(eval(expr))  # noqa: S307
+        except Exception:
+            pass
+        return expr
+
+    return re.sub(r"\d+(?:\s*[+\-]\s*\d+)+", _eval_match, text)
+
+
 def extract_json_from_text(text: str) -> dict:
     cleaned = remove_code_fence(text)
 
@@ -44,11 +59,18 @@ def extract_json_from_text(text: str) -> dict:
     if direct:
         return direct
 
+    # Coba evaluasi ekspresi aritmatika (model VLM kadang menulis '6600 + 2300 + 3000')
+    evaluated = _eval_arithmetic_values(cleaned)
+    if evaluated != cleaned:
+        direct = safe_parse_json(evaluated)
+        if direct:
+            return direct
+
     decoder = json.JSONDecoder()
-    for match in re.finditer(r"\{", cleaned):
+    for match in re.finditer(r"\{", evaluated):
         start = match.start()
         try:
-            obj, _ = decoder.raw_decode(cleaned[start:])
+            obj, _ = decoder.raw_decode(evaluated[start:])
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict):

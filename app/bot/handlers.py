@@ -341,16 +341,16 @@ class BotHandlers:
             telegram_file = await context.bot.get_file(telegram_file_id)
             await telegram_file.download_to_drive(custom_path=str(temp_path))
 
-            if not self.ocr_engine:
-                await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
-                return
-
-            ocr_text = await asyncio.to_thread(self.ocr_engine.extract_text, str(temp_path))
-            if not ocr_text:
-                await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
-                return
-
-            extracted = await self.extractor.extract(ocr_text=ocr_text)
+            if self.ocr_engine:
+                # PaddleOCR / GLM-OCR path
+                ocr_text = await asyncio.to_thread(self.ocr_engine.extract_text, str(temp_path))
+                if not ocr_text:
+                    await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
+                    return
+                extracted = await self.extractor.extract(ocr_text=ocr_text)
+            else:
+                # VLM path: extractor reads image directly
+                extracted = await self.extractor.extract(image_path=str(temp_path))
             normalized = self.transaction_service.normalize_extraction(extracted or {})
 
             if normalized["status"] == "failed":
