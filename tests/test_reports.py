@@ -43,7 +43,7 @@ def test_daily_and_monthly_report() -> None:
         transaction_time=None,
         total=35000,
         status="success",
-        image_path="uploads/a.jpg",
+        telegram_file_id="uploads/a.jpg",
         raw_json={},
         items=[],
     )
@@ -55,7 +55,7 @@ def test_daily_and_monthly_report() -> None:
         transaction_time=None,
         total=20000,
         status="partial",
-        image_path="uploads/b.jpg",
+        telegram_file_id="uploads/b.jpg",
         raw_json={},
         items=[],
     )
@@ -82,7 +82,7 @@ def test_last_transactions() -> None:
             transaction_time=None,
             total=10000 + idx,
             status="success",
-            image_path=f"uploads/{idx}.jpg",
+            telegram_file_id=f"uploads/{idx}.jpg",
             raw_json={},
             items=[],
         )

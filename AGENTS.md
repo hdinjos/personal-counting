@@ -339,6 +339,7 @@ Setiap transaksi (foto/voice) **tidak langsung disimpan**. Bot menampilkan data 
 # Setup
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+pip install -r requirements-paddle.txt  # opsional, hanya untuk OCR_BACKEND=paddleocr
 cp .env.example .env  # isi TELEGRAM_BOT_TOKEN
 
 # Jalankan AI servers

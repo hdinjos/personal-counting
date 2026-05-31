@@ -5,6 +5,8 @@ from pathlib import Path
 
 import httpx
 
+from app.ai.errors import TranscriptionError
+
 
 class VoiceTranscriber:
     def __init__(
@@ -51,10 +53,10 @@ class VoiceTranscriber:
                     await asyncio.sleep(2 ** attempt)
                 else:
                     if isinstance(last_exc, httpx.TimeoutException):
-                        raise RuntimeError("whisper-server request timed out") from last_exc
-                    raise RuntimeError(f"whisper-server request failed: {last_exc}") from last_exc
+                        raise TranscriptionError("whisper-server request timed out") from last_exc
+                    raise TranscriptionError(f"whisper-server request failed: {last_exc}") from last_exc
             except httpx.HTTPError as exc:
-                raise RuntimeError(f"whisper-server request failed: {exc}") from exc
+                raise TranscriptionError(f"whisper-server request failed: {exc}") from exc
 
         if response.status_code >= 400:
             detail = response.text.strip()
@@ -66,19 +68,19 @@ class VoiceTranscriber:
                     " (Hint: Telegram voice note biasanya .ogg/opus. Jalankan whisper-server dengan --convert "
                     "dan pastikan ffmpeg tersedia, atau konversi audio ke WAV sebelum dikirim.)"
                 )
-            raise RuntimeError(message)
+            raise TranscriptionError(message)
 
         try:
             payload = response.json()
         except ValueError as exc:
-            raise RuntimeError("Invalid JSON response from whisper-server") from exc
+            raise TranscriptionError("Invalid JSON response from whisper-server") from exc
 
         if not isinstance(payload, dict):
-            raise RuntimeError("Unexpected response type from whisper-server")
+            raise TranscriptionError("Unexpected response type from whisper-server")
 
         error_message = payload.get("error")
         if isinstance(error_message, str) and error_message.strip():
-            raise RuntimeError(f"whisper-server error: {error_message.strip()}")
+            raise TranscriptionError(f"whisper-server error: {error_message.strip()}")
 
         text = payload.get("text")
         if not isinstance(text, str):

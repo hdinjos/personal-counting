@@ -1,13 +1,10 @@
-from datetime import date, time
-
 from app.services.transaction_service import (
     DEFAULT_STORE_NAME,
     INCOMPLETE_TRANSACTION_MESSAGE,
     MANUAL_TOTAL_MESSAGE,
-    STATUS_NEEDS_TOTAL_CONFIRMATION,
     TransactionService,
 )
-from app.utils.dates import format_date_id, now_local_time, today_local_date
+from app.utils.dates import today_local_date
 
 
 class FakeRepository:
@@ -25,9 +22,8 @@ class FakeRepository:
         return Result()
 
 
-def test_process_and_store_success_with_default_store_and_quantity() -> None:
-    repo = FakeRepository()
-    service = TransactionService(repo)
+def test_prepare_extraction_applies_default_store_and_quantity() -> None:
+    service = TransactionService(FakeRepository())
 
     payload = {
         "status": "partial",
@@ -37,44 +33,34 @@ def test_process_and_store_success_with_default_store_and_quantity() -> None:
         "summary": {"total": "15000"},
     }
 
-    upload_date = today_local_date("Asia/Jakarta")
-    result = service.process_and_store(1, "user", "uploads/1.jpg", payload)
+    normalized = service.prepare_extraction(payload)
 
-    assert result["status"] == "success"
-    assert result["total"] == 15000
-    assert repo.called is True
-    assert repo.last_payload["total"] == 15000
-    assert result["date"] == format_date_id(upload_date, now_local_time("Asia/Jakarta"))
-    assert result["receipt_date"] == "27 Mei 2026 10:15 WIB"
-    assert repo.last_payload["transaction_date"] == upload_date
-    assert repo.last_payload["raw_json"]["transaction"]["date"] == date(2026, 5, 27)
-    assert repo.last_payload["store_name"] == DEFAULT_STORE_NAME
-    assert repo.last_payload["items"][0]["quantity"] == 1.0
+    assert normalized["store"]["name"] == DEFAULT_STORE_NAME
+    assert normalized["items"][0]["quantity"] == 1.0
+    assert normalized["summary"]["total"] == 15000
 
 
-def test_process_and_store_generates_receipt_date_when_missing() -> None:
-    repo = FakeRepository()
-    service = TransactionService(repo)
+def test_expected_total_detects_mismatch_without_mutating_input() -> None:
+    service = TransactionService(FakeRepository())
 
     payload = {
-        "status": "partial",
+        "status": "success",
         "store": {"name": "Warung"},
-        "transaction": {"date": None, "time": "09:00"},
-        "items": [{"name": "Kopi", "subtotal": "20000"}],
-        "summary": {"total": "20000"},
+        "transaction": {"date": "2026-05-27"},
+        "items": [{"name": "Beras", "subtotal": "10000", "quantity": 1}],
+        "summary": {"total": "12000", "discount": 0, "tax": 0, "service_charge": 0},
     }
+    normalized = service.prepare_extraction(payload)
 
-    upload_date = today_local_date("Asia/Jakarta")
-    result = service.process_and_store(1, "user", "uploads/1.jpg", payload)
+    expected, corrected = service.expected_total(normalized)
 
-    assert result["status"] == "success"
-    assert result["date"] == format_date_id(upload_date, now_local_time("Asia/Jakarta"))
-    assert result["receipt_date"] == format_date_id(upload_date, time(9, 0))
-    assert repo.last_payload["transaction_date"] == upload_date
-    assert repo.last_payload["raw_json"]["transaction"]["date"] == upload_date
+    assert expected == 10000
+    # Input must remain untouched.
+    assert normalized["summary"]["total"] == 12000
+    assert corrected is not normalized
 
 
-def test_process_and_store_failed_when_minimum_data_missing() -> None:
+def test_store_confirmed_transaction_failed_when_minimum_data_missing() -> None:
     repo = FakeRepository()
     service = TransactionService(repo)
 
@@ -85,33 +71,43 @@ def test_process_and_store_failed_when_minimum_data_missing() -> None:
         "items": [{"name": None, "subtotal": "20000"}],
         "summary": {"total": "20000"},
     }
+    normalized = service.prepare_extraction(payload)
+    upload_date = today_local_date("Asia/Jakarta")
 
-    result = service.process_and_store(1, "user", "uploads/1.jpg", payload)
+    result = service.store_confirmed_transaction(
+        1, "user", "uploads/1.jpg", normalized, 20000, upload_date
+    )
 
     assert result["status"] == "failed"
     assert result["message"] == INCOMPLETE_TRANSACTION_MESSAGE
     assert repo.called is False
 
 
-def test_process_and_store_requests_total_confirmation_when_mismatch() -> None:
+def test_store_confirmed_transaction_success_with_default_store() -> None:
     repo = FakeRepository()
     service = TransactionService(repo)
 
     payload = {
-        "status": "success",
-        "store": {"name": "Warung"},
-        "transaction": {"date": "2026-05-27"},
-        "items": [{"name": "Beras", "subtotal": "10000", "quantity": 1}],
-        "summary": {"total": "12000", "discount": 0, "tax": 0, "service_charge": 0},
+        "status": "partial",
+        "store": {"name": None},
+        "transaction": {"date": "2026-05-27", "time": "10:15"},
+        "items": [{"name": "Roti", "category": "makanan", "unit_price": "15000", "quantity": None}],
+        "summary": {"total": "15000"},
     }
+    normalized = service.prepare_extraction(payload)
+    upload_date = today_local_date("Asia/Jakarta")
 
-    result = service.process_and_store(1, "user", "uploads/1.jpg", payload)
+    result = service.store_confirmed_transaction(
+        1, "user", "uploads/1.jpg", normalized, 15000, upload_date, manual_total_input=False
+    )
 
-    assert result["status"] == STATUS_NEEDS_TOTAL_CONFIRMATION
-    assert result["total"] == 12000
-    assert result["expected_total"] == 10000
-    assert isinstance(result["pending_payload"], dict)
-    assert repo.called is False
+    assert result["status"] == "success"
+    assert result["total"] == 15000
+    assert repo.called is True
+    assert repo.last_payload["total"] == 15000
+    assert repo.last_payload["transaction_date"] == upload_date
+    assert repo.last_payload["store_name"] == DEFAULT_STORE_NAME
+    assert result["receipt_date"] == "27 Mei 2026 10:15 WIB"
 
 
 def test_store_confirmed_transaction_saves_success_with_manual_marker() -> None:
@@ -125,16 +121,11 @@ def test_store_confirmed_transaction_saves_success_with_manual_marker() -> None:
         "items": [{"name": "Beras", "subtotal": "10000", "quantity": 1}],
         "summary": {"total": "12000", "discount": 0, "tax": 0, "service_charge": 0},
     }
-    first_result = service.process_and_store(1, "user", "uploads/1.jpg", mismatch_payload)
-
+    normalized = service.prepare_extraction(mismatch_payload)
     upload_date = today_local_date("Asia/Jakarta")
+
     result = service.store_confirmed_transaction(
-        1,
-        "user",
-        "uploads/1.jpg",
-        first_result["pending_payload"],
-        12000,
-        upload_date,
+        1, "user", "uploads/1.jpg", normalized, 12000, upload_date
     )
 
     assert result["status"] == "success"

@@ -52,6 +52,11 @@ expense-agent/
    source .venv/bin/activate
    pip install -r requirements.txt
    ```
+   PaddleOCR bersifat opsional (paket besar, ~1GB). Install hanya jika memakai `OCR_BACKEND=paddleocr`:
+   ```bash
+   pip install -r requirements-paddle.txt
+   ```
+   Jika memakai `OCR_BACKEND=glm_ocr_llamacpp` atau `vlm_llamacpp`, paddle tidak diperlukan.
 3. Siapkan env:
    ```bash
    cp .env.example .env

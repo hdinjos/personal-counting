@@ -55,7 +55,7 @@ def get_settings() -> Settings:
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         llamacpp_base_url=os.getenv("LLAMACPP_BASE_URL", "http://localhost:8000/v1").rstrip("/"),
         llamacpp_model=os.getenv("LLAMACPP_MODEL", "local-qwen3-vl"),
-        whisper_server_base_url=os.getenv("WHISPER_SERVER_BASE_URL", "http://127.0.0.1:8080").rstrip("/"),
+        whisper_server_base_url=os.getenv("WHISPER_SERVER_BASE_URL", "http://127.0.0.1:8001").rstrip("/"),
         whisper_server_inference_path=os.getenv("WHISPER_SERVER_INFERENCE_PATH", "/inference"),
         whisper_server_timeout_seconds=int(os.getenv("WHISPER_SERVER_TIMEOUT_SECONDS", "120")),
         whisper_language=os.getenv("WHISPER_LANGUAGE", "id"),
@@ -74,5 +74,5 @@ def get_settings() -> Settings:
         timezone=os.getenv("TZ", "Asia/Jakarta"),
         enable_user_whitelist=_env_bool("ENABLE_USER_WHITELIST", False),
         allowed_user_ids=[int(u.strip()) for u in os.getenv("ALLOWED_USER_IDS", "").split(",") if u.strip().isdigit()],
-        enable_startup_health_check=_env_bool("ENABLE_STARTUP_HEALTH_CHECK", True),
+        enable_startup_health_check=_env_bool("ENABLE_STARTUP_HEALTH_CHECK", False),
     )

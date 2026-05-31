@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import tempfile
 
 from PIL import Image, ImageFilter, ImageOps
@@ -53,7 +55,7 @@ class PaddleOCREngine:
         self._ocr = None
 
     def _build(self, lang: str):
-        from paddleocr import PaddleOCR
+        PaddleOCR = self._import_paddleocr()
 
         # enable_mkldnn=False mencegah crash oneDNN (ConvertPirAttribute2RuntimeAttribute) di paddlepaddle 3.x CPU.
         # text_rec_score_thresh=0.5 membuang hasil low-confidence (noise) agar tidak mengganggu interpretasi llama.
@@ -66,10 +68,24 @@ class PaddleOCREngine:
             text_rec_score_thresh=0.5,
         )
 
+    @staticmethod
+    def _import_paddleocr():
+        try:
+            from paddleocr import PaddleOCR
+        except ImportError as exc:
+            raise RuntimeError(
+                "Backend OCR PaddleOCR dipilih tetapi paket 'paddleocr'/'paddlepaddle' belum terpasang. "
+                "Install dengan: pip install -r requirements-paddle.txt, "
+                "atau gunakan OCR_BACKEND=glm_ocr_llamacpp / vlm_llamacpp."
+            ) from exc
+        return PaddleOCR
+
     def _get_ocr(self):
         if self._ocr is None:
             try:
                 self._ocr = self._build(self.lang)
+            except RuntimeError:
+                raise
             except Exception:
                 logger.warning("PaddleOCR lang=%r tidak didukung, fallback ke 'latin'", self.lang)
                 self._ocr = self._build("latin")
@@ -82,7 +98,6 @@ class PaddleOCREngine:
             return self._run_ocr(processed_path or image_path)
         finally:
             if processed_path:
-                import os
                 try:
                     os.unlink(processed_path)
                 except OSError:
@@ -158,7 +173,6 @@ class PaddleOCREngine:
 
         # Merge orphan value lines: jika baris hanya berisi angka dan baris sebelumnya
         # berakhir ':', gabungkan ke baris sebelumnya.
-        import re
         merged: list[list[tuple[float, str]]] = []
         for row in rows:
             texts_only = " ".join(t[1] for t in row).strip()

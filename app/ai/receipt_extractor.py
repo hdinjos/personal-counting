@@ -9,6 +9,7 @@ from typing import Any, Optional
 import httpx
 
 from app.ai.ocr import preprocess_for_vlm
+from app.ai.errors import ExtractionError
 from app.ai.prompts import RECEIPT_EXTRACTION_PROMPT
 from app.utils.json_utils import extract_json_from_text
 
@@ -88,6 +89,17 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout_seconds)
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def extract(self, ocr_text: Optional[str] = None, text_input: Optional[str] = None, image_path: Optional[str] = None) -> dict[str, Any]:
         if not ocr_text and not text_input and not image_path:
@@ -115,18 +127,18 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
     async def _request_with_retry(self, payload: dict[str, Any]) -> dict[str, Any]:
         import asyncio
 
+        client = self._get_client()
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                    response = await client.post(f"{self.base_url}/chat/completions", json=payload)
-                    response.raise_for_status()
-                    return response.json()
+                response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+                response.raise_for_status()
+                return response.json()
             except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
                 last_exc = exc
                 if attempt < self.max_retries:
                     await asyncio.sleep(2 ** attempt)
-        raise last_exc
+        raise ExtractionError(f"llama-server request failed: {last_exc}") from last_exc
 
     def _build_text_payload(self, text_input: str) -> dict[str, Any]:
         extra_instruction = (

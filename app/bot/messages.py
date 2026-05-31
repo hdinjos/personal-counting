@@ -27,9 +27,6 @@ FAILED_TRANSACTION_MESSAGE = (
 # Backward compatible alias.
 FAILED_RECEIPT_MESSAGE = FAILED_TRANSACTION_MESSAGE
 
-CONFIRM_KEYWORDS = {"ya", "y", "simpan", "ok", "oke", "yes"}
-CANCEL_KEYWORDS = {"batal", "tidak", "no", "cancel"}
-
 
 def format_confirmation_request(data: dict) -> str:
     """Format extracted data for user confirmation before saving."""

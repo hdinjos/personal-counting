@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -28,7 +29,9 @@ async def check_all_services(llamacpp_base_url: str, whisper_base_url: str) -> d
     llama_url = f"{llamacpp_base_url.rstrip('/')}/models"
     whisper_url = f"{whisper_base_url.rstrip('/')}/health"
 
-    llama_ok = await check_server_health("llama-server", llama_url)
-    whisper_ok = await check_server_health("whisper-server", whisper_url)
+    llama_ok, whisper_ok = await asyncio.gather(
+        check_server_health("llama-server", llama_url),
+        check_server_health("whisper-server", whisper_url),
+    )
 
     return {"llama": llama_ok, "whisper": whisper_ok}

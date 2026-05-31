@@ -220,7 +220,7 @@ class BotHandlers:
                     self.transaction_service.store_confirmed_transaction,
                     update.effective_user.id,
                     update.effective_user.username,
-                    pending["image_path"],
+                    pending["telegram_file_id"],
                     pending["normalized_payload"],
                     total,
                     upload_date,
@@ -248,7 +248,7 @@ class BotHandlers:
                 self.transaction_service.store_confirmed_transaction,
                 update.effective_user.id,
                 update.effective_user.username,
-                pending["image_path"],
+                pending["telegram_file_id"],
                 pending["normalized_payload"],
                 total,
                 upload_date,
@@ -267,18 +267,17 @@ class BotHandlers:
         """Save the pending transaction after user confirms. Check total consistency first."""
         upload_date = parse_receipt_date(pending.get("upload_date"))
         normalized = pending["normalized_payload"]
-        normalized["status"] = "success"
         total = normalized["summary"]["total"]
 
-        # Check if total is consistent with items
-        expected_total = self.transaction_service._calculate_expected_total(normalized)
-        if expected_total is not None and expected_total != total:
+        # Check if total is consistent with items (non-mutating; corrected copy returned).
+        expected, corrected = self.transaction_service.expected_total(normalized)
+        if expected is not None and expected != total:
             # Switch to manual total input mode
             pending["type"] = "manual_total"
             self._set_pending_confirmation(context, pending)
             await update.message.reply_text(
                 f"⚠️ Total transaksi ({messages.format_rupiah(total)}) tidak konsisten "
-                f"dengan total item ({messages.format_rupiah(expected_total)}).\n\n"
+                f"dengan total item ({messages.format_rupiah(expected)}).\n\n"
                 "Balas dengan nominal total yang benar (angka saja), atau *batal* untuk membatalkan.",
                 parse_mode="Markdown",
             )
@@ -289,8 +288,8 @@ class BotHandlers:
                 self.transaction_service.store_confirmed_transaction,
                 update.effective_user.id,
                 update.effective_user.username,
-                pending["image_path"],
-                normalized,
+                pending["telegram_file_id"],
+                corrected,
                 total,
                 upload_date,
                 False,
@@ -351,14 +350,12 @@ class BotHandlers:
             else:
                 # VLM path: extractor reads image directly
                 extracted = await self.extractor.extract(image_path=str(temp_path))
-            normalized = self.transaction_service.normalize_extraction(extracted or {})
+            normalized = self.transaction_service.prepare_extraction(extracted or {})
 
             if normalized["status"] == "failed":
                 await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
                 return
 
-            self.transaction_service._apply_defaults(normalized)
-            self.transaction_service._fill_missing_totals(normalized)
             total = normalized["summary"]["total"]
 
             if total is None or total <= 0:
@@ -380,7 +377,7 @@ class BotHandlers:
 
             pending = {
                 "type": "save_transaction",
-                "image_path": telegram_file_id,
+                "telegram_file_id": telegram_file_id,
                 "normalized_payload": normalized,
                 "upload_date": upload_date.strftime("%Y-%m-%d"),
                 "created_at_ts": datetime.now().timestamp(),
@@ -432,7 +429,7 @@ class BotHandlers:
             await msg.edit_text(f"Pesan dikenali: \"{transcribed_text}\"\nSedang memproses transaksi...")
 
             extracted = await self.extractor.extract(text_input=transcribed_text)
-            normalized = self.transaction_service.normalize_extraction(extracted or {})
+            normalized = self.transaction_service.prepare_extraction(extracted or {})
 
             try:
                 await msg.delete()
@@ -443,8 +440,6 @@ class BotHandlers:
                 await update.message.reply_text(messages.FAILED_RECEIPT_MESSAGE)
                 return
 
-            self.transaction_service._apply_defaults(normalized)
-            self.transaction_service._fill_missing_totals(normalized)
             total = normalized["summary"]["total"]
 
             if total is None or total <= 0:
@@ -474,7 +469,7 @@ class BotHandlers:
 
             pending = {
                 "type": "save_transaction",
-                "image_path": telegram_file_id,
+                "telegram_file_id": telegram_file_id,
                 "normalized_payload": normalized,
                 "upload_date": upload_date.strftime("%Y-%m-%d"),
                 "created_at_ts": datetime.now().timestamp(),

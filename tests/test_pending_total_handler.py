@@ -18,6 +18,10 @@ class DummyTransactionService:
         }
         self.calls: list[tuple] = []
 
+    def expected_total(self, normalized):
+        # Default: consistent total so the save path proceeds to storage.
+        return None, normalized
+
     def store_confirmed_transaction(self, *args):
         self.calls.append(args)
         return self.result
@@ -34,7 +38,7 @@ class DummyMessage:
         self.text = text
         self.replies: list[str] = []
 
-    async def reply_text(self, text: str):
+    async def reply_text(self, text: str, **kwargs):
         self.replies.append(text)
         return None
 
@@ -62,7 +66,7 @@ def _build_handlers(service: DummyTransactionService) -> BotHandlers:
 
 def _pending_payload(created_at_ts: float) -> dict:
     return {
-        "image_path": "uploads/1.ogg",
+        "telegram_file_id": "uploads/1.ogg",
         "normalized_payload": {
             "status": "success",
             "store": {"name": "Warung"},
@@ -161,3 +165,42 @@ async def test_batal_pending_total_with_pending() -> None:
 
     assert PENDING_TOTAL_KEY not in context.user_data
     assert any("dibatalkan" in reply for reply in update.message.replies)
+
+
+def _save_pending(created_at_ts: float) -> dict:
+    pending = _pending_payload(created_at_ts)
+    pending["type"] = "save_transaction"
+    return pending
+
+
+@pytest.mark.asyncio
+async def test_save_transaction_confirm_stores() -> None:
+    service = DummyTransactionService()
+    handlers = _build_handlers(service)
+    update = DummyUpdate(text="ya")
+    context = DummyContext()
+    context.user_data[PENDING_TOTAL_KEY] = _save_pending(datetime.now().timestamp())
+
+    await handlers.handle_pending_total_text(update, context)
+
+    assert len(service.calls) == 1
+    assert PENDING_TOTAL_KEY not in context.user_data
+    assert any("berhasil disimpan" in reply for reply in update.message.replies)
+
+
+@pytest.mark.asyncio
+async def test_save_transaction_mismatch_switches_to_manual_total() -> None:
+    service = DummyTransactionService()
+    # Report an inconsistent expected total.
+    service.expected_total = lambda normalized: (99999, normalized)
+    handlers = _build_handlers(service)
+    update = DummyUpdate(text="ya")
+    context = DummyContext()
+    context.user_data[PENDING_TOTAL_KEY] = _save_pending(datetime.now().timestamp())
+
+    await handlers.handle_pending_total_text(update, context)
+
+    assert len(service.calls) == 0
+    assert context.user_data[PENDING_TOTAL_KEY]["type"] == "manual_total"
+    assert any("tidak konsisten" in reply for reply in update.message.replies)
+

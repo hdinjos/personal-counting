@@ -105,10 +105,16 @@ def build_application() -> Application:
         enable_user_whitelist=settings.enable_user_whitelist,
     )
 
+    async def _post_shutdown(application: Application) -> None:
+        aclose = getattr(extractor, "aclose", None)
+        if aclose is not None:
+            await aclose()
+
     application = (
         ApplicationBuilder()
         .token(settings.telegram_bot_token)
         .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
         .build()
     )
     application.add_handler(CommandHandler("start", handlers.start))

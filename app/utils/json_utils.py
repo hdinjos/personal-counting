@@ -37,6 +37,12 @@ def safe_parse_json(text: str) -> dict:
     return {}
 
 
+def _safe_eval_additive(expr: str) -> int:
+    """Evaluasi ekspresi penjumlahan/pengurangan bilangan bulat tanpa eval()."""
+    tokens = re.findall(r"[+\-]?\s*\d+", expr)
+    return sum(int(re.sub(r"\s+", "", t)) for t in tokens)
+
+
 def _eval_arithmetic_values(text: str) -> str:
     """Ganti ekspresi aritmatika sederhana (mis. '13700 + 25500 + 8200') dengan hasilnya."""
     def _eval_match(m: re.Match) -> str:
@@ -44,7 +50,7 @@ def _eval_arithmetic_values(text: str) -> str:
         try:
             # Hanya izinkan digit, +, -, spasi
             if re.fullmatch(r"[\d+\-\s]+", expr):
-                return str(eval(expr))  # noqa: S307
+                return str(_safe_eval_additive(expr))
         except Exception:
             pass
         return expr
@@ -77,4 +83,3 @@ def extract_json_from_text(text: str) -> dict:
             return obj
 
     return {}
-

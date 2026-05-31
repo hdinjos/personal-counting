@@ -28,7 +28,7 @@ class TransactionRepository:
         transaction_time,
         total: int,
         status: str,
-        image_path: str,
+        telegram_file_id: str,
         raw_json: dict[str, Any] | None,
         items: Iterable[dict[str, Any]] | None = None,
     ) -> Transaction:
@@ -41,7 +41,7 @@ class TransactionRepository:
                 transaction_time=transaction_time,
                 total=total,
                 status=status,
-                image_path=image_path,
+                telegram_file_id=telegram_file_id,
                 raw_json=json.dumps(raw_json, ensure_ascii=False, default=str) if raw_json is not None else None,
             )
             for item in items or []:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timezone
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -16,6 +16,10 @@ def _now_utc() -> datetime:
 class Transaction(Base):
     __tablename__ = "transactions"
 
+    __table_args__ = (
+        Index("ix_transactions_user_date", "telegram_user_id", "transaction_date"),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_user_id: Mapped[int] = mapped_column(Integer, index=True)
     telegram_username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -24,7 +28,7 @@ class Transaction(Base):
     transaction_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     total: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
-    image_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    telegram_file_id: Mapped[str] = mapped_column(String(512), nullable=False)
     raw_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now_utc, nullable=False)
 

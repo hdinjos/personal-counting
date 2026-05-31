@@ -15,9 +15,18 @@ class RateLimiter:
     def is_allowed(self, user_id: int) -> bool:
         now = time.time()
         cutoff = now - self.window_seconds
-        timestamps = self._requests[user_id]
-        self._requests[user_id] = [t for t in timestamps if t > cutoff]
-        if len(self._requests[user_id]) >= self.max_requests:
+
+        # Prune stale users to prevent the dict from growing unbounded.
+        for uid in list(self._requests.keys()):
+            fresh = [t for t in self._requests[uid] if t > cutoff]
+            if fresh:
+                self._requests[uid] = fresh
+            else:
+                del self._requests[uid]
+
+        recent = self._requests.get(user_id, [])
+        if len(recent) >= self.max_requests:
             return False
-        self._requests[user_id].append(now)
+        recent.append(now)
+        self._requests[user_id] = recent
         return True

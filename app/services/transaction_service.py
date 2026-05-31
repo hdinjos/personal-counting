@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from datetime import date
 from typing import Any
 
@@ -39,60 +40,11 @@ class TransactionService:
         self.repository = repository
         self.timezone = timezone
 
-    def process_and_store(
-        self,
-        telegram_user_id: int,
-        telegram_username: str | None,
-        image_path: str,
-        extracted_payload: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        normalized = self.normalize_extraction(extracted_payload or {})
-        if normalized["status"] == "failed":
-            return {"status": "failed", "message": normalized.get("message")}
-
-        self._apply_defaults(normalized)
-        if not self._has_minimum_transaction_data(normalized):
-            return {"status": "failed", "message": INCOMPLETE_TRANSACTION_MESSAGE}
-
-        self._fill_missing_totals(normalized)
-        total = normalized["summary"]["total"]
-        if total is None or total <= 0:
-            return {"status": "failed", "message": INCOMPLETE_TRANSACTION_MESSAGE}
-
-        upload_date = today_local_date(self.timezone)
-        receipt_date = normalized["transaction"]["date"] or upload_date
-        normalized["transaction"]["date"] = receipt_date
-        receipt_time = normalized["transaction"]["time"]
-        upload_time = now_local_time(self.timezone)
-
-        expected_total = self._calculate_expected_total(normalized)
-        if expected_total is not None and expected_total != total:
-            return {
-                "status": STATUS_NEEDS_TOTAL_CONFIRMATION,
-                "store_name": normalized["store"]["name"],
-                "date": format_date_id(upload_date, upload_time),
-                "receipt_date": format_date_id(receipt_date, receipt_time),
-                "total": total,
-                "expected_total": expected_total,
-                "message": "Total transaksi belum konsisten dengan rincian item.",
-                "pending_payload": normalized,
-            }
-
-        normalized["status"] = "success"
-        return self._store_transaction(
-            telegram_user_id=telegram_user_id,
-            telegram_username=telegram_username,
-            image_path=image_path,
-            normalized=normalized,
-            upload_date=upload_date,
-            manual_total_input=normalized.get("manual_total_input", False),
-        )
-
     def store_confirmed_transaction(
         self,
         telegram_user_id: int,
         telegram_username: str | None,
-        image_path: str,
+        telegram_file_id: str,
         normalized_payload: dict[str, Any],
         confirmed_total: int,
         upload_date: date | None = None,
@@ -124,7 +76,7 @@ class TransactionService:
         return self._store_transaction(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,
-            image_path=image_path,
+            telegram_file_id=telegram_file_id,
             normalized=normalized,
             upload_date=target_upload_date,
             manual_total_input=manual_total_input,
@@ -180,11 +132,28 @@ class TransactionService:
             "manual_total_input": bool(payload.get("manual_total_input", False)),
         }
 
+    def prepare_extraction(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Public API: normalize an AI payload, apply defaults, and fill totals."""
+        normalized = self.normalize_extraction(payload or {})
+        self._apply_defaults(normalized)
+        self._fill_missing_totals(normalized)
+        return normalized
+
+    def expected_total(self, normalized: dict[str, Any]) -> tuple[int | None, dict[str, Any]]:
+        """Public API: compute the expected total without mutating the input.
+
+        Returns (expected_total, corrected_payload). Auto-corrections are applied
+        only to the returned copy so callers can keep the original pending state.
+        """
+        corrected = copy.deepcopy(normalized)
+        value = self._calculate_expected_total(corrected)
+        return value, corrected
+
     def _store_transaction(
         self,
         telegram_user_id: int,
         telegram_username: str | None,
-        image_path: str,
+        telegram_file_id: str,
         normalized: dict[str, Any],
         upload_date: date,
         manual_total_input: bool,
@@ -206,7 +175,7 @@ class TransactionService:
             transaction_time=receipt_time,
             total=total,
             status="success",
-            image_path=image_path,
+            telegram_file_id=telegram_file_id,
             raw_json=normalized,
             items=normalized["items"],
         )

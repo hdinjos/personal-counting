@@ -1,0 +1,5 @@
+# Optional dependencies for the PaddleOCR backend (OCR_BACKEND=paddleocr).
+# Not required when using OCR_BACKEND=glm_ocr_llamacpp or vlm_llamacpp.
+paddleocr~=3.6.0
+paddlepaddle~=3.3.1
+setuptools~=82.0.1
