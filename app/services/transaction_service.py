@@ -298,12 +298,18 @@ class TransactionService:
             return None
 
         summary = normalized["summary"]
-        return (
-            subtotal_from_items
-            - (summary["discount"] or 0)
-            + (summary["tax"] or 0)
-            + (summary["service_charge"] or 0)
-        )
+        discount = summary["discount"] or 0
+        tax = summary["tax"] or 0
+        service_charge = summary["service_charge"] or 0
+
+        # Jika total tanpa tax sudah cocok dengan summary.total, berarti tax sudah
+        # inklusif (umum di struk ritel/minimarket). Nullify tax agar tidak double-count.
+        total_without_tax = subtotal_from_items - discount + service_charge
+        if tax and summary["total"] is not None and total_without_tax == summary["total"]:
+            summary["tax"] = None
+            tax = 0
+
+        return subtotal_from_items - discount + tax + service_charge
 
     @staticmethod
     def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:

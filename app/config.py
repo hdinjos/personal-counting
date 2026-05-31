@@ -21,6 +21,12 @@ class Settings:
     whisper_server_timeout_seconds: int
     whisper_language: str
     ocr_language: str
+    ocr_backend: str
+    glm_ocr_base_url: str
+    glm_ocr_model: str
+    glm_ocr_prompt: str
+    glm_ocr_timeout_seconds: int
+    glm_ocr_max_tokens: int
     database_url: str
     upload_dir: Path
     use_dummy_extractor: bool
@@ -54,6 +60,12 @@ def get_settings() -> Settings:
         whisper_server_timeout_seconds=int(os.getenv("WHISPER_SERVER_TIMEOUT_SECONDS", "120")),
         whisper_language=os.getenv("WHISPER_LANGUAGE", "id"),
         ocr_language=os.getenv("OCR_LANGUAGE", "id"),
+        ocr_backend=os.getenv("OCR_BACKEND", "paddleocr").lower(),
+        glm_ocr_base_url=os.getenv("GLM_OCR_BASE_URL", "http://127.0.0.1:8002/v1").rstrip("/"),
+        glm_ocr_model=os.getenv("GLM_OCR_MODEL", "glm-ocr"),
+        glm_ocr_prompt=os.getenv("GLM_OCR_PROMPT", "OCR markdown. Preserve receipt line order from top to bottom. Do not add explanations."),
+        glm_ocr_timeout_seconds=int(os.getenv("GLM_OCR_TIMEOUT_SECONDS", "120")),
+        glm_ocr_max_tokens=int(os.getenv("GLM_OCR_MAX_TOKENS", "4096")),
         database_url=os.getenv("DATABASE_URL", "sqlite:///expense-agent.db"),
         upload_dir=upload_dir,
         use_dummy_extractor=_env_bool("USE_DUMMY_EXTRACTOR", False),

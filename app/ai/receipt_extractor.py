@@ -145,13 +145,18 @@ class LlamaCppReceiptExtractor(BaseReceiptExtractor):
             "\n\nATURAN TAMBAHAN untuk teks hasil OCR:\n"
             "- Teks berasal dari OCR struk, urutannya sudah diatur per baris (kiri→kanan, atas→bawah).\n"
             "- Mungkin ada salah baca karakter (mis. O↔0, l/I↔1, S↔5, 'lotal'→'Total', 'Me1'→'Mei'). Perbaiki bila konteksnya jelas, TAPI jangan mengarang data.\n"
+            "- Abaikan karakter tunggal atau pendek acak (1-2 huruf/angka seperti 'G', 'T', 'F4', 'H3') yang muncul di pinggir baris — ini noise dari latar belakang foto, BUKAN bagian dari struk.\n"
             "- Dalam satu baris, nama item biasanya di kiri dan harga/qty di kanan; pasangkan item dengan harga/subtotal pada baris yang sama.\n"
+            "- Pada struk minimarket, setiap baris item sering menampilkan harga DUA KALI: angka tanpa separator ribuan (mis. 13700) lalu angka dengan koma (mis. 13,700). Keduanya adalah NILAI YANG SAMA. Gunakan angka paling kanan sebagai subtotal.\n"
             "- Angka nominal PALING KANAN pada baris item adalah SUBTOTAL baris (sudah termasuk kuantitas) → isikan ke item.subtotal; JANGAN mengalikannya lagi dengan quantity.\n"
             "- Anggap sebuah angka sebagai unit_price HANYA bila muncul dalam pola 'qty x harga', 'qty × harga', atau '@harga'. Jika tidak ada pola itu, hitung unit_price = subtotal / quantity.\n"
+            "- Baris 'VOUCHER', 'DISKON', atau angka dalam tanda kurung seperti (6,600) adalah POTONGAN HARGA — JANGAN masukkan sebagai item. Jumlahkan SEMUA potongan ke summary.discount sebagai angka positif.\n"
+            "- Baris 'ANDA HEMAT' menunjukkan total penghematan/diskon — gunakan sebagai konfirmasi summary.discount, bukan sebagai kembalian.\n"
             "- Jumlah seluruh item.subtotal seharusnya sama dengan Subtotal/Total yang tertera. Jika hasil penjumlahanmu jauh lebih besar dari total tertera, kemungkinan kamu tertukar unit_price dengan subtotal — perbaiki.\n"
             "- summary.total = nominal akhir yang BENAR-BENAR DIBAYAR (cari baris seperti 'TOTAL BELANJA', 'NON TUNAI', 'TUNAI', 'TOTAL BAYAR', 'BAYAR'); gunakan nilai itu apa adanya.\n"
-            "- PPN/pajak pada struk ritel/minimarket umumnya SUDAH TERMASUK dalam harga (baris seperti 'PPN', 'DPP', 'PB1' hanya rincian). Jika begitu, isi summary.tax = null dan JANGAN menambahkan PPN ke total. Isi summary.tax HANYA jika pajak jelas DITAMBAHKAN terpisah di atas subtotal.\n"
-            "- Abaikan baris yang jelas bukan data transaksi (mis. ucapan terima kasih, jam buka, alamat website)."
+            "- PPN/pajak pada struk ritel/minimarket (Indomaret, Alfamart, dll) SUDAH TERMASUK dalam harga jual — baris 'PPN', 'DPP', 'PB1' hanya rincian informatif. Isi summary.tax = null. Isi summary.tax dengan angka HANYA jika pajak jelas DITAMBAHKAN di atas subtotal (mis. restoran yang menulis '+PB1 10%' terpisah).\n"
+            "- Baris 'HARGA JUAL' pada struk minimarket adalah harga sebelum diskon — BUKAN total yang dibayar. Abaikan untuk summary.total.\n"
+            "- Abaikan baris yang jelas bukan data transaksi (mis. ucapan terima kasih, jam buka, alamat website, QR code, nomor referensi)."
         )
         return {
             "model": self.model,

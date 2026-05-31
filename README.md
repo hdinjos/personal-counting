@@ -96,3 +96,40 @@ pytest
 - Request extractor diarahkan ke `LLAMACPP_BASE_URL`
 - Field `model` extractor selalu dikirim menggunakan `LLAMACPP_MODEL` (default: `local-qwen3-vl`)
 - Request transkripsi diarahkan ke `WHISPER_SERVER_BASE_URL + WHISPER_SERVER_INFERENCE_PATH`
+
+## OCR Backend
+
+Bot mendukung dua backend OCR:
+
+### PaddleOCR (default)
+Tidak perlu konfigurasi tambahan. PaddleOCR aktif secara default.
+
+### GLM-OCR via llama.cpp
+GLM-OCR adalah model vision yang membaca teks dari gambar struk via `llama-server` (OpenAI-compatible API). Hasil OCR berupa teks/markdown yang kemudian diinterpretasi oleh LLM extractor.
+
+Untuk mengaktifkan, tambahkan di `.env`:
+```env
+OCR_BACKEND=glm_ocr_llamacpp
+GLM_OCR_BASE_URL=http://127.0.0.1:8002/v1
+GLM_OCR_MODEL=glm-ocr
+```
+
+Jalankan `llama-server` untuk GLM-OCR (di terminal terpisah):
+```bash
+llama-server \
+  -hf ggml-org/GLM-OCR-GGUF:Q8_0 \
+  --host 127.0.0.1 \
+  --port 8002 \
+  --alias glm-ocr \
+  -c 8192 \
+  -np 1 \
+  --temp 0.1 \
+  --top-k 1 \
+  --top-p 1.0 \
+  --timeout 120 \
+  --no-ui
+```
+
+> **Catatan**: Parameter di atas (`-hf`, `--host`, `--port`, dll.) adalah parameter saat menjalankan `llama-server`, bukan konfigurasi `.env` bot. Bot hanya perlu tahu `GLM_OCR_BASE_URL` dan `GLM_OCR_MODEL` untuk mengirim request.
+
+Jika server GLM-OCR tidak aktif, bot tidak crash — OCR mengembalikan kosong dan user menerima pesan gagal seperti biasa.
